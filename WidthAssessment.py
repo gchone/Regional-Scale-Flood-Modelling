@@ -318,9 +318,14 @@ def transectsauxpointsdemesure(streamnetwork, idfield, cspoints, csfield, distfi
 
     eventtype = "{0} Point {1}".format(idfield, distfield)
     MakeRouteEventLayer(streamnetwork, idfield, transevnt, eventtype, "transevnt_lyr", offset_field=ofstfield)
+    # GC: ajout d'un fichier temporaire car PointsToLine bug avec une layer en input
+    ptsfortrans = gc.CreateScratchName("trpt", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
+    arcpy.CopyFeatures_management("transevnt_lyr", ptsfortrans)
 
     rawtrans = gc.CreateScratchName("trpt", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
-    PointsToLine("transevnt_lyr", rawtrans, csfield, "", "NO_CLOSE")
+    #PointsToLine("transevnt_lyr", rawtrans, csfield, "", "NO_CLOSE")
+    PointsToLine(ptsfortrans, rawtrans, csfield, "", "NO_CLOSE")
+
     AlterField(rawtrans, csfield, "Select_id", "Select_id")
 
     transends = gc.CreateScratchName("trpt", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
