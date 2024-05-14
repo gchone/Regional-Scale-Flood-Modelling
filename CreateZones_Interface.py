@@ -91,11 +91,12 @@ class CreateZonesWlakes(object):
         return True
 
     def updateParameters(self, parameters):
-        if parameters[2].valueAsText and parameters[2].valueAsText != "#":
-            parameters[3].enabled = True
-            parameters[3].value = 0.001
-        else:
-            parameters[3].enabled = False
+        # # For the version with a slope criteria
+        # if parameters[2].valueAsText and parameters[2].valueAsText != "#":
+        #     parameters[3].enabled = True
+        #     parameters[3].value = 0.001
+        # else:
+        #     parameters[3].enabled = False
         return
 
     def updateMessages(self, parameters):
