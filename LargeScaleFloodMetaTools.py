@@ -73,7 +73,7 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
 
     execute_WSsmoothing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_cor_basename, lidar3m_forws_basename, DEMs_field, ouput_table)
 
-def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints, messages):
+def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints_D8, outpoints_route, messages):
 
     try:
         matchatlas = gc.CreateScratchName("matchatlas", data_type="ArcInfoTable", workspace="in_memory")
@@ -112,15 +112,18 @@ def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes
         Qpoints_subD8_bis = gc.CreateScratchName("QptsSub", data_type="FeatureClass", workspace="in_memory")
         arcpy.da.NumPyArrayToFeatureClass(nparray, Qpoints_subD8_bis, "XY", arcpy.Describe(routesD8).spatialReference)
 
+        arcpy.AddField_management(Qpoints_subD8_bis, "Drainage", "DOUBLE")
+        arcpy.CalculateField_management(Qpoints_subD8_bis, "Drainage", str(r_flowacc.meanCellWidth) + "*" + str(
+            r_flowacc.meanCellHeight) + "*!Flowacc!/1000000.", "PYTHON")
+
+        arcpy.CopyFeatures_management(Qpoints_subD8_bis, outpoints_D8)
+
         res_table = gc.CreateScratchName("QptsTable", data_type="ArcInfoTable", workspace="in_memory")
         execute_LocatePointsAlongRoutes(Qpoints_subD8_bis, route_main_RID, routes_main, route_main_RID, res_table, 10000)
 
-        arcpy.AddField_management(res_table, "Drainage", "DOUBLE")
-        arcpy.CalculateField_management(res_table, "Drainage", str(r_flowacc.meanCellWidth)+"*"+str(r_flowacc.meanCellHeight) + "*!Flowacc!/1000000.", "PYTHON")
-
         arcpy.MakeRouteEventLayer_lr(routes_main, route_main_RID, res_table, route_main_RID + " POINT MEAS", "res_lyr")
 
-        arcpy.CopyFeatures_management("res_lyr", outpoints)
+        arcpy.CopyFeatures_management("res_lyr", outpoints_route)
 
     finally:
         gc.CleanAllTempFiles()

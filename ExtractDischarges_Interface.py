@@ -100,9 +100,15 @@ class ExtractDischarges(object):
             datatype="GPRasterLayer",
             parameterType="Required",
             direction="Input")
-        param_outpoints = arcpy.Parameter(
-            displayName="Points Output table",
+        param_outpoints_D8 = arcpy.Parameter(
+            displayName="Points en D8 - Output table",
             name="outpoints",
+            datatype="GPTableView",
+            parameterType="Required",
+            direction="Output")
+        param_outpoints_routes = arcpy.Parameter(
+            displayName="Points on routes - Output table",
+            name="outpoints2",
             datatype="GPTableView",
             parameterType="Required",
             direction="Output")
@@ -112,7 +118,7 @@ class ExtractDischarges(object):
         param_routeD8_RID.parameterDependencies = [param_routesD8.name]
         param_route_main_RID.parameterDependencies = [param_routes_main.name]
 
-        params = [param_routes_Atlas, param_links_Atlas, param_RID_field_Atlas, param_routes_AtlasD8, param_links_AtlasD8, param_RID_field_AtlasD8, param_pts_D8, param_fpoints_atlas, param_routesD8, param_routeD8_RID, param_routes_main, param_route_main_RID, param_relate_table, param_r_flowacc, param_outpoints]
+        params = [param_routes_Atlas, param_links_Atlas, param_RID_field_Atlas, param_routes_AtlasD8, param_links_AtlasD8, param_RID_field_AtlasD8, param_pts_D8, param_fpoints_atlas, param_routesD8, param_routeD8_RID, param_routes_main, param_route_main_RID, param_relate_table, param_r_flowacc, param_outpoints_D8, param_outpoints_routes]
 
 
         return params
@@ -142,8 +148,9 @@ class ExtractDischarges(object):
         route_main_RID = parameters[11].valueAsText
         relate_table = parameters[12].valueAsText
         r_flowacc = arcpy.Raster(parameters[13].valueAsText)
-        outpoints = parameters[14].valueAsText
+        outpoints_D8 = parameters[14].valueAsText
+        outpoints_routes = parameters[15].valueAsText
 
-        execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints, messages)
+        execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints_D8, outpoints_routes, messages)
 
         return
