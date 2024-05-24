@@ -101,15 +101,15 @@ class ExtractDischarges(object):
             parameterType="Required",
             direction="Input")
         param_outpoints_D8 = arcpy.Parameter(
-            displayName="Points en D8 - Output table",
+            displayName="Points en D8 - Output points",
             name="outpoints",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_outpoints_routes = arcpy.Parameter(
-            displayName="Points on routes - Output table",
+            displayName="Points on routes - Output points",
             name="outpoints2",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
