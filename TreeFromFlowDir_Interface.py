@@ -31,7 +31,7 @@ class TreeFromFlowDir(object):
         param_route_shapefile = arcpy.Parameter(
             displayName="Output network layer",
             name="route_shapefile",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_routelinks_table = arcpy.Parameter(

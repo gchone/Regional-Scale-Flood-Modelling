@@ -241,25 +241,27 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
                 arcpy.SpatialJoin_analysis(split_pts, points_shp, join_split, match_option="CLOSEST", join_type="KEEP_COMMON", search_radius=tolerance)
                 arcpy.DeleteIdentical_management(join_split, "id") # If two split points are too close, the split point on the D8 path is the same
                 gc.CleanTempFile(points_shp)
-
-                join_split_cursor = arcpy.da.SearchCursor(join_split, ["RID", "dist", "X", "Y"])
+                join_split2 = gc.CreateScratchName("pts_join", data_type="FeatureClass", workspace="in_memory")
+                arcpy.Sort_management(join_split, join_split2, [["dist", "DESCENDING"]])
+                join_split_cursor = arcpy.da.SearchCursor(join_split2, ["RID", "dist", "X", "Y"])
                 for split in join_split_cursor:
-                    # for every split pts, update the RID downstream for the points
+                    # for every split pts, update the RID upstream for the points
                     segmentid +=1
                     matchingrid = pointsarray["RID"] == split[0]
-                    matchingdist = pointsarray["dist"] <= split[1]
+                    matchingdist = pointsarray["dist"] > split[1]
                     pointsarray["RID"][np.logical_and(matchingrid, matchingdist)] = segmentid
                     pointsarray["dist"][np.logical_and(matchingrid, matchingdist)] = pointsarray["dist"][np.logical_and(matchingrid, matchingdist)] - split[1]
                     # update the links
-                    links[RiverNetwork.reaches_linkfieldup][links[RiverNetwork.reaches_linkfieldup] == split[0]] = segmentid
+                    links[RiverNetwork.reaches_linkfielddown][links[RiverNetwork.reaches_linkfielddown] == split[0]] = segmentid
                     to_add = numpy.empty(1, dtype=links.dtype)
-                    to_add[RiverNetwork.reaches_linkfielddown] = segmentid
-                    to_add[RiverNetwork.reaches_linkfieldup] = split[0]
+                    to_add[RiverNetwork.reaches_linkfielddown] = split[0]
+                    to_add[RiverNetwork.reaches_linkfieldup] = segmentid
                     links = numpy.append(links, to_add)
-                    # update initial line points
-                    if split[0] in initialpoint.keys(): # it's not the case for the most downstream reach
-                        initialpoint[segmentid] = initialpoint[split[0]]
-                    initialpoint[split[0]] = arcpy.Point(split[2], split[3])
+                    # add initial line points
+                    initialpoint[segmentid] = arcpy.Point(split[2], split[3])
+                    # update the fp_id
+                    if split[0] in original_fp_OID:
+                        original_fp_OID[segmentid] = original_fp_OID.pop(split[0])
 
         # Saving the points
         if arcpy.Exists(str_output_points) and arcpy.env.overwriteOutput == True:
