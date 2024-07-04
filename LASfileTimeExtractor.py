@@ -45,12 +45,14 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
                 while day <= max_day:
                     if not os.path.exists(os.path.join(output_folder, str(day))):
                         os.makedirs(os.path.join(output_folder, str(day)))
-                    gps_time1 = (datetime.datetime(day.year, day.month, day.day) - gps_epoch).total_seconds() - 1000000000
+                    gps_time1 = (datetime.datetime(day.year, day.month, day.day) - gps_epoch).total_seconds() - 1000000000 - UTC*3600
                     gps_time2 = gps_time1 + 24*3600
 
-                    p = subprocess.Popen([str_binlastoolsfolder + "\\las2las.exe", "-i", file, "-o", os.path.join(output_folder, str(day), file[:-4]+".las"),
+                    las2las_cmd = [str_binlastoolsfolder + "\\las2las.exe", "-i", file, "-o", os.path.join(output_folder, str(day), file[:-4]+".las"),
                                           "-keep_class", "2",
-                                          "-keep_gps_time", str(gps_time1), str(gps_time2)], cwd=str_lasfolder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+                                          "-keep_gps_time", str(gps_time1), str(gps_time2)]
+
+                    p = subprocess.Popen(las2las_cmd, cwd=str_lasfolder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
                     out, err = p.communicate()  # make the script wait for the las2las to be done
 
                     day = day + datetime.timedelta(days=1)
@@ -66,11 +68,18 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
             p = subprocess.Popen([str_binlastoolsfolder + "\\lasinfo.exe", file], cwd=r,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             out, err = p.communicate()
+            nb_points = 0
             for elem in str(err).split(r"\r\n"):
-                if (elem.find("number of point records")) > -1:
+                if elem.find("number of point records") > -1 and not (elem.find("extended number of point records") > -1):
                     subelem = elem.strip().split()
-                    if int(subelem[4]) == 0: #empty las file
-                        os.remove(os.path.join(r, file))
+                    nb_points = nb_points + int(subelem[4])
+                if elem.find("extended number of point records") > -1:
+                    subelem = elem.strip().split()
+                    nb_points = nb_points + int(subelem[5])
+            if nb_points == 0: #empty las file
+                if os.path.exists(os.path.join(r, file)):
+                    os.remove(os.path.join(r, file))
+
 
     for r, d, f in os.walk(output_folder):
         if len(f) == 0 and len(d)==0: # empty root directory
@@ -86,7 +95,6 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
             out, err = p.communicate() # make the script wait for the lasmerge to be done
 
     messages.addMessage("Computing footprints")
-
     p = subprocess.Popen([str_binlastoolsfolder + "\\lasboundary.exe", "-i", os.path.join(merge_folder, "*.las")], cwd=merge_folder,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     out, err = p.communicate()  # make the script wait for the lasboundary to be done
