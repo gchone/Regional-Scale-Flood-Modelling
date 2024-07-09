@@ -129,7 +129,7 @@ def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes
         gc.CleanAllTempFiles()
 
 
-def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_flowacc, routes, links, RID_field, Qpoints, id_field_Qpoints, RID_Qpoints, dist_field_Qpoints, AtlasReach_field_Qpoints, targetpoints, id_field_target, RID_field_target, Distance_field_target, DEM_field_target, Qcsv_file, output_points, messages):
+def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_flowacc, routes, links, RID_field, Qorder_field, Qpoints, id_field_Qpoints, RID_Qpoints, dist_field_Qpoints, AtlasReach_field_Qpoints, targetpoints, id_field_target, RID_field_target, Distance_field_target, DEM_field_target, Qcsv_file, output_points, messages):
 
     # Extract Flow Acc along D8
     arcpy.MakeRouteEventLayer_lr(route_D8, RID_field_D8, D8pathpoints, RID_field_D8 + " POINT dist", "D8pts_lyr")
@@ -148,6 +148,7 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
 
     network = RiverNetwork()
     network.dict_attr_fields['id'] = RID_field
+    network.dict_attr_fields['order'] = Qorder_field
     network.load_data(routes, links)
 
     Qcollection = Points_collection(network, "Qpts")
@@ -170,10 +171,10 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
         # Look for the closest downstream point in targetcollection
         down_point = None
         down_reach = reach
-        while down_point is None and not down_reach.is_downstream_end():
+        while down_point is None and not down_reach.is_downstream_end(): # Looking for the closest downstream point fir the reach
             down_reach = down_reach.get_downstream_reach()
             down_point = down_reach.get_last_point(targetcollection)
-        if reach.is_downstream_end():
+        if reach.is_downstream_end() or not hasattr(down_point, "lastQpts"): # No downstream point (most downstream reach) or no Qpts point downstream
             lastQpts = None
         else:
             # discharge point associated with the closest downstream point in targetcollection
@@ -202,16 +203,24 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
                     targetpt.QptsID = lastQpts.AtlasID
 
     # First browse bis: assign the closest upstream Q point for points without downstream Q points
-    for reach in network.browse_reaches_up_to_down():
+    for reach in network.browse_reaches_up_to_down(prioritize_reach_attribute="order", reverse=True):
         if reach.is_upstream_end():
             lastQpts = None
         for Qpts in reach.browse_points(Qcollection, orientation="UP_TO_DOWN"):
-            if lastQpts is not None:
-                for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
-                    if not hasattr(targetpt, "lastQpts"):
-                        targetpt.lastQpts = lastQpts
-                        targetpt.QptsID = lastQpts.AtlasID
             lastQpts = Qpts
+        if lastQpts is not None:
+            for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
+                if not hasattr(targetpt, "lastQpts"):
+                    targetpt.lastQpts = lastQpts
+                    targetpt.QptsID = lastQpts.AtlasID
+
+    # First browse ter: check if every point has a Q points associated
+    for reach in network.browse_reaches_down_to_up():
+        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+            try:
+                assert hasattr(targetpt, "lastQpts")
+            except AssertionError as e:
+                messages.addErrorMessage("Points without an upstream or downstream discharge point on reach "+str(reach.id))
 
     # Second browse: Extract the right Q LiDAR discharge and do the drainage area correction
     #  but first, the csv file is loaded into a dictionary
