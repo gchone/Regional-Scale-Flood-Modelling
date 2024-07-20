@@ -217,10 +217,9 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
     # First browse ter: check if every point has a Q points associated
     for reach in network.browse_reaches_down_to_up():
         for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
-            try:
-                assert hasattr(targetpt, "lastQpts")
-            except AssertionError as e:
+            if not hasattr(targetpt, "lastQpts"):
                 messages.addErrorMessage("Points without an upstream or downstream discharge point on reach "+str(reach.id))
+                raise AssertionError
 
     # Second browse: Extract the right Q LiDAR discharge and do the drainage area correction
     #  but first, the csv file is loaded into a dictionary

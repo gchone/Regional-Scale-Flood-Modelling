@@ -443,7 +443,7 @@ class Points_collection(_NumpyArrayHolder):
             dict_attr_output_fields = self.dict_attr_fields.copy()
             # and add all created attributes
             for attr in self._variablesset:
-                dict_attr_output_fields[attr] = attr
+                dict_attr_output_fields[attr] = self._variablestype[attr][1]
 
         for attr, field in dict_attr_output_fields.items():
             if attr in self.dict_attr_fields.keys():
