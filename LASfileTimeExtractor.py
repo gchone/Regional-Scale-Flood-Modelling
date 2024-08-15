@@ -49,7 +49,7 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
                     gps_time2 = gps_time1 + 24*3600
 
                     las2las_cmd = [str_binlastoolsfolder + "\\las2las.exe", "-i", file, "-o", os.path.join(output_folder, str(day), file[:-4]+".las"),
-                                          "-keep_class", "2",
+                                          "-keep_class", "2", "-keep_class", "9", "-keep_class", "1", "-keep_class", "10", "-keep_class", "11",
                                           "-keep_gps_time", str(gps_time1), str(gps_time2)]
 
                     p = subprocess.Popen(las2las_cmd, cwd=str_lasfolder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
