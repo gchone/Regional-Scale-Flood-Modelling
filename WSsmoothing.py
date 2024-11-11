@@ -7,7 +7,7 @@ import arcpy
 
 from tree.RiverNetwork import *
 from QuantileRegression import QuantileCarving
-from scipy.stats import norm
+
 
 
 
@@ -41,16 +41,13 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
     # When doing this first down to up, we can also compute the fill version by DEM of the water surface, which is the
     #  right data to use as the water surface for hydraulic modeling (cs.ztosmooth)
     # June 2022 modification : Instead of a fill, quantile carving
-    distr = norm(0, 0.08)
+
     for reach in network.browse_reaches_down_to_up():
         if reach.is_downstream_end():
             prev_cs = None
         elif reach.get_downstream_reach() != prev_cs.reach:
             prev_cs = reach.get_downstream_reach().get_last_point(collection)
         for cs in reach.browse_points(collection):
-            adderr = distr.rvs()
-            cs.zerr += adderr
-            cs.z_forws += adderr
 
             if prev_cs != None and cs.DEM_ID == prev_cs.DEM_ID:
                 cs.z_fill = max(prev_cs.z_fill, cs.zerr)
