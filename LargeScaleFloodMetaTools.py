@@ -71,7 +71,7 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
     interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
     arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
 
-    execute_WSsmoothing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_cor_basename, lidar3m_forws_basename, DEMs_field, ouput_table)
+    execute_WSsmoothing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_cor_basename, lidar3m_forws_basename, DEMs_field, ouput_table, messages)
 
 def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints_D8, outpoints_route, messages):
 

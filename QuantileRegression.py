@@ -5,7 +5,7 @@ import scipy.sparse
 import scipy.optimize
 import math
 
-def QuantileCarving(listcs, prevcs, tau=0.5):
+def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     # This quantile carving process comes from :
     #    Schwanghart, W., Scherler, D., 2017. Bumps in river profiles:
     #    uncertainty assessment and smoothing using quantile regression
@@ -37,7 +37,7 @@ def QuantileCarving(listcs, prevcs, tau=0.5):
     z = np.array(z)
 
     n = len(listcs)
-    print(n)
+
     #n = 6
     ix = range(1, n)
     ixc = range(0, n-1)
@@ -63,11 +63,19 @@ def QuantileCarving(listcs, prevcs, tau=0.5):
     A = scipy.sparse.hstack([Atmp, Atmp2])
     #A = scipy.sparse.csr_matrix.todense(A)
     b = np.zeros((n,1))
-    print("ready")
-    output = scipy.optimize.linprog(f, A, b, Aeq, beq, bounds=bounds,
-                           method='interior-point', callback=None, options={"sparse":True, "tol":0.0001})
+    status = 1
+    tol = 0.000001 # Tolerance is hard-coded, starting at 10^-6
+    while tol <= 0.001 and status > 0: # the loop is there to try with a higher tolerance if the process fails
+        output = scipy.optimize.linprog(f, A, b, Aeq, beq, bounds=bounds,
+                               method='interior-point', callback=None, options={"sparse":True, "tol":tol})
+        status = output.status
+        if status>0:
+            tol = tol*10
+    if status>0:
+        messages.addWarningMessage("Quantile regression failure, check results for potential obvious error")
     newz = output.x[-n:]
+
     for i in range(0, n):
         listcs[i].ztosmooth = newz[i]
-    print("done")
+
 

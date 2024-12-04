@@ -11,7 +11,7 @@ from QuantileRegression import QuantileCarving
 
 
 
-def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_z_field, dem_forws_field, DEM_ID_field, output_points, smooth_perc = 0.9):
+def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_z_field, dem_forws_field, DEM_ID_field, output_points, messages, smooth_perc = 0.9):
 
     # The smoothing process :
     # - Removes bumps in the water surface profile following the quantile carving process of
@@ -90,7 +90,7 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
         for cs in reach.browse_points(collection):
             # Stop when there is a DEM change or when we reach the last cs upstream
             if prev_DEM_ID is not None and prev_DEM_ID != cs.DEM_ID:
-                QuantileCarving(list_cs, prevcs_list)
+                QuantileCarving(list_cs, prevcs_list, messages)
                 list_cs = []
                 prevcs_list = None
                 restartdown = False
@@ -98,7 +98,7 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
             list_cs.append(cs)
 
             if isendreach and cs==endnode:
-                QuantileCarving(list_cs, prevcs_list)
+                QuantileCarving(list_cs, prevcs_list, messages)
                 list_cs = []
                 prev_DEM_ID = None
                 restartdown = True
