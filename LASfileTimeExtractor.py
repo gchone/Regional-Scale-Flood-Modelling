@@ -7,7 +7,7 @@ import time
 
 
 
-def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_folder, merge_folder, messages):
+def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_folder, ground_folder, merge_folder, messages):
 
     messages.addMessage("Filtering las files by days...")
 
@@ -38,6 +38,7 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
 
                 min_real_time = gps_epoch + datetime.timedelta(seconds=local_min)
                 max_real_time = gps_epoch + datetime.timedelta(seconds=local_max)
+                min_real_time = max(min_real_time, datetime.datetime(2019, 7, 1)) #!! Temp fix for Shubi 2019
 
                 min_day = min_real_time.date()
                 max_day = max_real_time.date()
@@ -49,7 +50,7 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
                     gps_time2 = gps_time1 + 24*3600
 
                     las2las_cmd = [str_binlastoolsfolder + "\\las2las.exe", "-i", file, "-o", os.path.join(output_folder, str(day), file[:-4]+".las"),
-                                          "-keep_class", "2", "-keep_class", "9", "-keep_class", "1", "-keep_class", "10", "-keep_class", "11",
+                                          #"-keep_class", "2", "-keep_class", "9", "-keep_class", "1", "-keep_class", "10", "-keep_class", "11",
                                           "-keep_gps_time", str(gps_time1), str(gps_time2)]
 
                     p = subprocess.Popen(las2las_cmd, cwd=str_lasfolder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
@@ -65,32 +66,52 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
 
     for r, d, f in os.walk(output_folder):
         for file in f:
-            p = subprocess.Popen([str_binlastoolsfolder + "\\lasinfo.exe", file], cwd=r,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            out, err = p.communicate()
-            nb_points = 0
-            for elem in str(err).split(r"\r\n"):
-                if elem.find("number of point records") > -1 and not (elem.find("extended number of point records") > -1):
-                    subelem = elem.strip().split()
-                    nb_points = nb_points + int(subelem[4])
-                if elem.find("extended number of point records") > -1:
-                    subelem = elem.strip().split()
-                    nb_points = nb_points + int(subelem[5])
-            if nb_points == 0: #empty las file
-                if os.path.exists(os.path.join(r, file)):
-                    os.remove(os.path.join(r, file))
+            file_size = os.path.getsize(os.path.join(r, file))
+            if file_size / (1024 * 1024) < 1:  # check only files of less than 1 MB
+                p = subprocess.Popen([str_binlastoolsfolder + "\\lasinfo.exe", file], cwd=r,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+                out, err = p.communicate()
+                nb_points = 0
+                points_checked = False
+                for elem in str(err).split(r"\r\n"):
+                    if elem.find("number of point records") > -1 and not (elem.find("extended number of point records") > -1):
+                        subelem = elem.strip().split()
+                        nb_points = nb_points + int(subelem[4])
+                        points_checked = True
+                    if elem.find("extended number of point records") > -1:
+                        subelem = elem.strip().split()
+                        nb_points = nb_points + int(subelem[5])
+                        points_checked = True
+                if not points_checked:
+                    raise Exception("Error checking points count: " + os.path.join(r, file))
+                    exit()
+                if nb_points == 0: #empty las file
+                    if os.path.exists(os.path.join(r, file)):
+                        os.remove(os.path.join(r, file))
 
 
     for r, d, f in os.walk(output_folder):
         if len(f) == 0 and len(d)==0: # empty root directory
             os.rmdir(r)
 
-    messages.addMessage("Merging tiles by days")
+    messages.addMessage("Ground classification")
 
     for r, d, f in os.walk(output_folder):
         for dir in d:
-            p = subprocess.Popen([str_binlastoolsfolder + "\\lasmerge.exe", "-i", os.path.join(r, dir,"*.las"), "-o",
-                                  os.path.join(merge_folder, "lidar"+dir+ ".las")], cwd=output_folder,
+            if not os.path.exists(os.path.join(ground_folder, dir)):
+                os.makedirs(os.path.join(ground_folder, dir))
+            p = subprocess.Popen([str_binlastoolsfolder + "\\lasground_new64.exe", "-i", os.path.join(r, dir,"*.las"), "-odir",
+                                  os.path.join(ground_folder, dir)], cwd=output_folder,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+            out, err = p.communicate() # make the script wait for the lasground to be done
+
+
+    messages.addMessage("Merging tiles by days + Ground filtering")
+
+    for r, d, f in os.walk(ground_folder):
+        for dir in d:
+            p = subprocess.Popen([str_binlastoolsfolder + "\\lasmerge.exe", "-keep_class", "2", "-i", os.path.join(r, dir,"*.las"), "-o",
+                                  os.path.join(merge_folder, "lidar"+dir+ ".las")], cwd=ground_folder,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             out, err = p.communicate() # make the script wait for the lasmerge to be done
 
