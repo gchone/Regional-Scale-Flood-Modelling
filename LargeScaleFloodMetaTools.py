@@ -62,7 +62,10 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
     lidar3m_cor_basename = str(arcpy.Describe(lidar3m_cor).basename)
     lidar3m_forws_basename = str(arcpy.Describe(lidar3m_forws).basename)
 
-    execute_AssignPointToClosestPointOnRoute("pts_layer", arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable, [lidar3m_cor_basename, lidar3m_forws_basename], routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field, pts_bathy_withws, "2-WAY CLOSEST")
+    execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_cor_basename, lidar3m_forws_basename],
+                                             routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
+                                             [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
+                                             [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
     pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
     execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_cor_basename, lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
 
@@ -144,7 +147,11 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
 
     # Join target points with the closest D8 point with the same RID
     targets_withFlowAcc = gc.CreateScratchName("targets", data_type="FeatureClass", workspace="in_memory")
-    execute_AssignPointToClosestPointOnRoute("D8pts_lyr2", arcpy.Describe(relate_table).basename + "." + RID_field, ["flowacc"], routes, RID_field, targetpoints, RID_field_target, Distance_field_target, targets_withFlowAcc, stat="CLOSEST")
+    execute_AssignPointToClosestPointOnRoute("D8pts_lyr2",
+                                             ["flowacc"], routes, RID_field, targetpoints, RID_field_target,
+                                             Distance_field_target,
+                                             [arcpy.Describe(relate_table).basename + "." + RID_field],
+                                             [RID_field_target], targets_withFlowAcc, stat="CLOSEST")
 
     network = RiverNetwork()
     network.dict_attr_fields['id'] = RID_field
@@ -258,11 +265,11 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
     #     arcpy.Delete_management(output_points)
     # arcpy.da.NumPyArrayToTable(finalarray, output_points)
 
-def execute_SpatializeQ_from_gauging_stations(route_D8, RID_field_D8, D8pathpoints, relate_table, r_flowacc, routes, links, RID_field, Qpoints, id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints, RID_Qpoints, dist_field_Qpoints, Q_field, targetpoints, id_field_target, RID_field_target, Distance_field_target, DEM_field_target, Qcsv_file, beta_coef, output_points, messages):
+def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints, id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints, RID_Qpoints, dist_field_Qpoints, Q_field, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef, output_points, messages):
     # Two cases :
-    # - either Q_field is a field in the Q points with the discharges to spatialize (DEM_field_target and Qcsv_file must be None).
+    # - either Q_field is a field in the Q points with the discharges to spatialize (DEM_footprints and Qcsv_file must be None).
     #   This is used to spatialize flood discharges
-    # - Qcsv_file provides multiple discharges, and the right discharge to use is indicated in the target point (DEM_field_target)
+    # - Qcsv_file provides multiple discharges, and the right discharge to use is indicated by the DEM_footprints
     #   This is used to spatialize LiDAR discharges
 
     class Ref_point:
@@ -273,26 +280,20 @@ def execute_SpatializeQ_from_gauging_stations(route_D8, RID_field_D8, D8pathpoin
             self.reach = reach
             self.dist = dist
 
-    # Extract Flow Acc along D8 (already done for inbci for Q flood)
+    # Extract Flow Acc along D8
+    arcpy.MakeRouteEventLayer_lr(routes_D8, RID_field_D8, D8pathpoints, RID_field_D8 + " POINT dist", "D8pts_lyr")
+    D8pts = gc.CreateScratchName("targets", data_type="FeatureClass", workspace="in_memory")
+    # I had a strange error when extracting the flow acc in a layer. Works if I use a Feature Class.... I don't know why
+    arcpy.CopyFeatures_management("D8pts_lyr", D8pts)
+    arcpy.sa.ExtractMultiValuesToPoints(D8pts, [[r_flowacc, "flowacc"]])
     if Q_field is None:
-        arcpy.MakeRouteEventLayer_lr(route_D8, RID_field_D8, D8pathpoints, RID_field_D8 + " POINT dist", "D8pts_lyr")
-        D8pts = gc.CreateScratchName("targets", data_type="FeatureClass", workspace="in_memory")
-        # I had a strange error when extracting the flow acc in a layer. Works if I use a Feature Class.... I don't know why
-        arcpy.CopyFeatures_management("D8pts_lyr", D8pts)
-        arcpy.sa.ExtractMultiValuesToPoints(D8pts, [[r_flowacc, "flowacc"]])
+        D8pts_withDEM = gc.CreateScratchName("D8ptsDEM", data_type="FeatureClass", workspace="in_memory")
+        arcpy.SpatialJoin_analysis(D8pts, DEM_footprints, D8pts_withDEM)
 
-        arcpy.MakeFeatureLayer_management(D8pts, "D8pts_lyr2")
-        D8_RID_field_in_relatetable = [f.name for f in arcpy.Describe(relate_table).fields][-2]
-        arcpy.AddJoin_management("D8pts_lyr2", RID_field_D8, relate_table,
-                                 D8_RID_field_in_relatetable)
-
-        # Join target points with the closest D8 point with the same RID
-        targets_withFlowAcc = gc.CreateScratchName("targets", data_type="FeatureClass", workspace=r"in_memory")
-        execute_AssignPointToClosestPointOnRoute("D8pts_lyr2", arcpy.Describe(relate_table).basename + "." + RID_field, ["flowacc"], routes, RID_field, targetpoints, RID_field_target, Distance_field_target, targets_withFlowAcc, stat="CLOSEST")
 
     network = RiverNetwork()
-    network.dict_attr_fields['id'] = RID_field
-    network.load_data(routes, links)
+    network.dict_attr_fields['id'] = RID_field_D8
+    network.load_data(routes_D8, links_D8)
 
     Qcollection = Points_collection(network, "Qpts")
     Qcollection.dict_attr_fields['id'] = id_field_Qpoints
@@ -305,15 +306,15 @@ def execute_SpatializeQ_from_gauging_stations(route_D8, RID_field_D8, D8pathpoin
     Qcollection.load_table(Qpoints)
 
     targetcollection = Points_collection(network, "target")
-    targetcollection.dict_attr_fields['id'] = id_field_target
-    targetcollection.dict_attr_fields['reach_id'] = RID_field_target
-    targetcollection.dict_attr_fields['dist'] = Distance_field_target
+    targetcollection.dict_attr_fields['id'] = "id"
+    targetcollection.dict_attr_fields['reach_id'] = RID_field_D8
+    targetcollection.dict_attr_fields['dist'] = "dist"
     targetcollection.dict_attr_fields['flowacc'] = "flowacc"
     if Q_field is None:
-        targetcollection.dict_attr_fields['DEM'] = DEM_field_target
-        targetcollection.load_table(targets_withFlowAcc)
+        targetcollection.dict_attr_fields['DEM'] = DEM_id_field
+        targetcollection.load_table(D8pts_withDEM)
     else:
-        targetcollection.load_table(targetpoints)
+        targetcollection.load_table(D8pts)
 
     if Q_field is None:
         # Read the csv file, transpose it

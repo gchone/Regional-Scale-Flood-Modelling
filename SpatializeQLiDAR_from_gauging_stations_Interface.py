@@ -16,30 +16,6 @@ class SpatializeQLiDAR_gauging_stations(object):
         self.canRunInBackground = True
 
     def getParameterInfo(self):
-        param_route_D8 = arcpy.Parameter(
-            displayName="Input route D8 feature class (lines)",
-            name="route_D8",
-            datatype="GPFeatureLayer",
-            parameterType="Required",
-            direction="Input")
-        param_RID_field_D8 = arcpy.Parameter(
-            displayName="RouteID field",
-            name="RID_field_D8",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
-        param_D8pathpoints = arcpy.Parameter(
-            displayName="D8 Pathpoints",
-            name="D8pathpoints",
-            datatype="GPTableView",
-            parameterType="Required",
-            direction="Input")
-        param_relate_table = arcpy.Parameter(
-            displayName="Relate table",
-            name="relate_table",
-            datatype="GPTableView",
-            parameterType="Required",
-            direction="Input")
         param_r_flowacc = arcpy.Parameter(
             displayName="Flow Accumulation raster",
             name="r_flowacc",
@@ -47,21 +23,27 @@ class SpatializeQLiDAR_gauging_stations(object):
             parameterType="Required",
             direction="Input")
         param_routes = arcpy.Parameter(
-            displayName="Input route feature class (lines)",
+            displayName="Input D8 route feature class",
             name="routes",
             datatype="GPFeatureLayer",
-            parameterType="Required",
-            direction="Input")
-        param_links = arcpy.Parameter(
-            displayName="Routes links",
-            name="links",
-            datatype="GPTableView",
             parameterType="Required",
             direction="Input")
         param_RID_field = arcpy.Parameter(
             displayName="RID field in routes feature class",
             name="RID_field",
             datatype="Field",
+            parameterType="Required",
+            direction="Input")
+        param_links = arcpy.Parameter(
+            displayName="Routes D8 links",
+            name="links",
+            datatype="GPTableView",
+            parameterType="Required",
+            direction="Input")
+        param_ptsonD8 = arcpy.Parameter(
+            displayName="Point on route D8 feature class (lines)",
+            name="ptsonD8",
+            datatype="GPTableView",
             parameterType="Required",
             direction="Input")
         param_Qpoints = arcpy.Parameter(
@@ -100,40 +82,22 @@ class SpatializeQLiDAR_gauging_stations(object):
             datatype="Field",
             parameterType="Required",
             direction="Input")
-        param_targetpoints = arcpy.Parameter(
-            displayName="Target points",
-            name="targetpoints",
-            datatype="GPTableView",
-            parameterType="Required",
-            direction="Input")
-        param_id_field_target = arcpy.Parameter(
-            displayName="ID field in target points feature class",
-            name="id_field_target",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
-        param_RID_field_target = arcpy.Parameter(
-            displayName="RID field in target points feature class",
-            name="RID_field_target",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
-        param_Distance_field_target = arcpy.Parameter(
-            displayName="MEAS field in target points feature class",
-            name="Distance_field_target",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
-        param_DEM_field_target = arcpy.Parameter(
-            displayName="DEM field in target points feature class",
-            name="DEM_field_target",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
         param_Qcsv_file = arcpy.Parameter(
             displayName="Qcsv_file",
             name="Qcsv_file",
             datatype="GPTableView",
+            parameterType="Required",
+            direction="Input")
+        param_DEMs_footprints = arcpy.Parameter(
+            displayName="DEMs footprint feature class",
+            name="DEMs_footprints",
+            datatype="GPFeatureLayer",
+            parameterType="Required",
+            direction="Input")
+        param_DEMs_field = arcpy.Parameter(
+            displayName="DEM id field in DEMs footprint feature class",
+            name="DEMs_field",
+            datatype="Field",
             parameterType="Required",
             direction="Input")
         param_beta = arcpy.Parameter(
@@ -149,7 +113,6 @@ class SpatializeQLiDAR_gauging_stations(object):
             parameterType="Required",
             direction="Output")
 
-        param_RID_field_D8.parameterDependencies = [param_route_D8.name]
         param_RID_field.parameterDependencies = [param_routes.name]
         param_id_field_Qpoints.parameterDependencies = [param_Qpoints.name]
         param_RID_Qpoints.parameterDependencies = [param_Qpoints.name]
@@ -157,13 +120,11 @@ class SpatializeQLiDAR_gauging_stations(object):
         param_drainage_Qpoints.parameterDependencies = [param_Qpoints.name]
         param_dist_field_Qpoints.parameterDependencies = [param_Qpoints.name]
 
-        param_id_field_target.parameterDependencies = [param_targetpoints.name]
-        param_RID_field_target.parameterDependencies = [param_targetpoints.name]
-        param_Distance_field_target.parameterDependencies = [param_targetpoints.name]
-        param_DEM_field_target.parameterDependencies = [param_targetpoints.name]
+        param_DEMs_field.parameterDependencies = [param_DEMs_footprints.name]
 
-        params = [param_route_D8, param_RID_field_D8, param_D8pathpoints, param_relate_table, param_r_flowacc, param_routes, param_links, param_RID_field, param_Qpoints, param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_RID_Qpoints, param_dist_field_Qpoints, param_targetpoints, param_id_field_target, param_RID_field_target, param_Distance_field_target, param_DEM_field_target, param_Qcsv_file, param_beta, param_output_points]
-
+        params = [param_r_flowacc, param_routes, param_RID_field, param_links, param_ptsonD8, param_Qpoints,
+                  param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_RID_Qpoints,
+                  param_dist_field_Qpoints, param_Qcsv_file, param_DEMs_footprints, param_DEMs_field, param_beta, param_output_points]
         return params
 
     def isLicensed(self):
@@ -176,35 +137,26 @@ class SpatializeQLiDAR_gauging_stations(object):
         return
 
     def execute(self, parameters, messages):
+        r_flowacc = arcpy.Raster(parameters[0].valueAsText)
+        routes = parameters[1].valueAsText
+        RID_field = parameters[2].valueAsText
+        links = parameters[3].valueAsText
+        D8pathpoints = parameters[4].valueAsText
+        Qpoints = parameters[5].valueAsText
+        id_field_Qpoints = parameters[6].valueAsText
+        name_Qpoints = parameters[7].valueAsText
+        drainage_Qpoints = parameters[8].valueAsText
+        RID_Qpoints = parameters[9].valueAsText
+        dist_field_Qpoints = parameters[10].valueAsText
+        csv_file = parameters[11].valueAsText
+        DEM_footprints = parameters[12].valueAsText
+        DEM_fottprints_idfield = parameters[13].valueAsText
+        beta_coef = float(parameters[14].valueAsText)
+        output_points = parameters[15].valueAsText
 
-        route_D8 = parameters[0].valueAsText
-        RID_field_D8 = parameters[1].valueAsText
-        D8pathpoints = parameters[2].valueAsText
-        relate_table = parameters[3].valueAsText
-        r_flowacc = arcpy.Raster(parameters[4].valueAsText)
-        routes = parameters[5].valueAsText
-        links = parameters[6].valueAsText
-        RID_field = parameters[7].valueAsText
-        Qpoints = parameters[8].valueAsText
-        id_field_Qpoints = parameters[9].valueAsText
-        name_Qpoints = parameters[10].valueAsText
-        drainage_Qpoints = parameters[11].valueAsText
-        RID_Qpoints= parameters[12].valueAsText
-        dist_field_Qpoints = parameters[13].valueAsText
-        targetpoints = parameters[14].valueAsText
-        id_field_target = parameters[15].valueAsText
-        RID_field_target = parameters[16].valueAsText
-        Distance_field_target = parameters[17].valueAsText
-        DEM_field_target = parameters[18].valueAsText
-        Qcsv_file = parameters[19].valueAsText
-        beta_coef = float(parameters[20].valueAsText)
-        output_points = parameters[21].valueAsText
-
-        execute_SpatializeQ_from_gauging_stations(route_D8, RID_field_D8, D8pathpoints, relate_table, r_flowacc, routes,
-                                                  links, RID_field, Qpoints, id_field_Qpoints, name_Qpoints,
-                                                  drainage_Qpoints, RID_Qpoints, dist_field_Qpoints, None,
-                                                  targetpoints, id_field_target, RID_field_target,
-                                                  Distance_field_target, DEM_field_target, Qcsv_file, beta_coef,
-                                                  output_points, messages)
+        execute_SpatializeQ_from_gauging_stations(routes, links, RID_field, D8pathpoints, r_flowacc, Qpoints,
+                                                  id_field_Qpoints, name_Qpoints, drainage_Qpoints, RID_Qpoints,
+                                                  dist_field_Qpoints, None, csv_file, DEM_footprints,
+                                                  DEM_fottprints_idfield, beta_coef, output_points, messages)
 
         return

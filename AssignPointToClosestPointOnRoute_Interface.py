@@ -20,20 +20,21 @@ class AssignPointToClosestPointOnRoute(object):
 
     def getParameterInfo(self):
         param_points = arcpy.Parameter(
-            displayName="Points feature class to project",
+            displayName="Points feature class to project (data points)",
             name="points",
             datatype="GPFeatureLayer",
-            parameterType="Required",
-            direction="Input")
-        param_points_RIDfield = arcpy.Parameter(
-            displayName="RouteID field in the points feature class",
-            name="points_RIDfield",
-            datatype="Field",
             parameterType="Required",
             direction="Input")
         param_list_fields_to_keep = arcpy.Parameter(
             displayName="Choose the fields to keep in the output",
             name="list_fields_to_keep",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input",
+            multiValue = True)
+        param_list_fields_matching = arcpy.Parameter(
+            displayName="Fields to match in the data points",
+            name="list_fields_matching",
             datatype="Field",
             parameterType="Required",
             direction="Input",
@@ -57,7 +58,7 @@ class AssignPointToClosestPointOnRoute(object):
             parameterType="Required",
             direction="Input")
         param_points_onroute = arcpy.Parameter(
-            displayName="Points layer on network",
+            displayName="Points layer on network (target points)",
             name="points_onroute",
             datatype="GPTableView",
             parameterType="Required",
@@ -74,6 +75,13 @@ class AssignPointToClosestPointOnRoute(object):
             datatype="Field",
             parameterType="Required",
             direction="Input")
+        param_list_fields_matching_target = arcpy.Parameter(
+            displayName="Fields to match in the target points",
+            name="z_field",
+            datatype="Field",
+            parameterType="Required",
+            direction="Input",
+            multiValue = True)
         param_output_table = arcpy.Parameter(
             displayName="Output point layer",
             name="output_shp",
@@ -81,16 +89,19 @@ class AssignPointToClosestPointOnRoute(object):
             parameterType="Required",
             direction="Output")
 
-
-        param_points_RIDfield.parameterDependencies = [param_points.name]
         param_list_fields_to_keep.parameterDependencies = [param_points.name]
         param_routesIDfield.parameterDependencies = [param_routes.name]
         param_points_onroute_RIDfield.parameterDependencies = [param_points_onroute.name]
         param_points_onroute_distfield.parameterDependencies = [param_points_onroute.name]
+        param_list_fields_matching.parameterDependencies = [param_points.name]
+        param_list_fields_matching_target.parameterDependencies = [param_points_onroute.name]
         param_stat.filter.type = "ValueList"
         param_stat.filter.list = ["MEAN", "CLOSEST", "MAX"]
         param_stat.value = "MEAN"
-        params = [param_points, param_points_RIDfield, param_list_fields_to_keep, param_stat, param_routes, param_routesIDfield, param_points_onroute, param_points_onroute_RIDfield, param_points_onroute_distfield, param_output_table]
+        params = [param_points, param_list_fields_to_keep, param_stat, param_routes,
+                  param_routesIDfield, param_points_onroute, param_points_onroute_RIDfield,
+                  param_points_onroute_distfield, param_list_fields_matching, param_list_fields_matching_target,
+                  param_output_table]
 
         return params
 
@@ -106,19 +117,23 @@ class AssignPointToClosestPointOnRoute(object):
     def execute(self, parameters, messages):
 
         points = parameters[0].valueAsText
-        points_RIDfield = parameters[1].valueAsText
-        list_fields_to_keep = (parameters[2].valueAsText).split(';')
+        list_fields_to_keep = (parameters[1].valueAsText).split(';')
         new_list = [str(item.split('.')[-1]) for item in list_fields_to_keep] #keep only the field name in case it's composed with table_name.field_name
-        stat = parameters[3].valueAsText
-        routes = parameters[4].valueAsText
-        routes_IDfield = parameters[5].valueAsText
-        points_onroute = parameters[6].valueAsText
-        points_onroute_RIDfield = parameters[7].valueAsText
-        points_onroute_distfield = parameters[8].valueAsText
-        output_table = parameters[9].valueAsText
+        stat = parameters[2].valueAsText
+        routes = parameters[3].valueAsText
+        routes_IDfield = parameters[4].valueAsText
+        points_onroute = parameters[5].valueAsText
+        points_onroute_RIDfield = parameters[6].valueAsText
+        points_onroute_distfield = parameters[7].valueAsText
+        list_fields_matching = (parameters[8].valueAsText).split(';')
+        list_fields_matching_target = (parameters[9].valueAsText).split(';')
+        output_table = parameters[10].valueAsText
 
 
-        execute_AssignPointToClosestPointOnRoute(points, points_RIDfield, new_list, routes, routes_IDfield, points_onroute, points_onroute_RIDfield, points_onroute_distfield, output_table, stat)
+        execute_AssignPointToClosestPointOnRoute(points, new_list, routes, routes_IDfield,
+                                                 points_onroute, points_onroute_RIDfield, points_onroute_distfield,
+                                                 list_fields_matching, list_fields_matching_target, output_table, stat)
+
 
 
 
