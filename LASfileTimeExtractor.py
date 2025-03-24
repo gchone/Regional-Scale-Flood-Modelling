@@ -11,6 +11,7 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
 
     messages.addMessage("Filtering las files by days...")
 
+    # Skip already process files (the ones already in the output folder)
     donefiles = set()
     for r, d, f in os.walk(output_folder):
         for file in f:
@@ -22,6 +23,8 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
     gps_epoch = datetime.datetime(1980, 1, 6)
     files = []
     # r=root, d=directories, f = files
+
+    # Scan through the files with lasinfo in order to find the time of the first and last point acquired in the las file
     for r, d, f in os.walk(str_lasfolder):
         for file in f:
             if (file[-4:] == '.laz' or file[-4:] == '.las') and file[:-4] not in donefiles:
@@ -38,17 +41,18 @@ def execute_extract_bydays(str_binlastoolsfolder, str_lasfolder, UTC, output_fol
 
                 min_real_time = gps_epoch + datetime.timedelta(seconds=local_min)
                 max_real_time = gps_epoch + datetime.timedelta(seconds=local_max)
-                min_real_time = max(min_real_time, datetime.datetime(2019, 7, 1)) #!! Temp fix for Shubi 2019
+                #min_real_time = max(min_real_time, datetime.datetime(2019, 7, 1)) #!! Temp fix for Shubi 2019
 
                 min_day = min_real_time.date()
                 max_day = max_real_time.date()
                 day = min_day
+
+                # Create a las file for each day between the first and the last point acquired in the las file
                 while day <= max_day:
                     if not os.path.exists(os.path.join(output_folder, str(day))):
                         os.makedirs(os.path.join(output_folder, str(day)))
                     gps_time1 = (datetime.datetime(day.year, day.month, day.day) - gps_epoch).total_seconds() - 1000000000 - UTC*3600
                     gps_time2 = gps_time1 + 24*3600
-
                     las2las_cmd = [str_binlastoolsfolder + "\\las2las.exe", "-i", file, "-o", os.path.join(output_folder, str(day), file[:-4]+".las"),
                                           #"-keep_class", "2", "-keep_class", "9", "-keep_class", "1", "-keep_class", "10", "-keep_class", "11",
                                           "-keep_gps_time", str(gps_time1), str(gps_time2)]
