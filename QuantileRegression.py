@@ -18,6 +18,9 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     # x and z are arrays of the same size with the distance and the elevations values
     #x = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
     #z = np.array([1., 2., 3., 2., 5., 4.])
+
+    tol = 0.000001  # Tolerance is hard-coded, at 10^-6
+
     if prevcs is None:
         minz = -math.inf
     else:
@@ -63,15 +66,11 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     A = scipy.sparse.hstack([Atmp, Atmp2])
     #A = scipy.sparse.csr_matrix.todense(A)
     b = np.zeros((n,1))
-    status = 1
-    tol = 0.000001 # Tolerance is hard-coded, starting at 10^-6
-    while tol <= 0.001 and status > 0: # the loop is there to try with a higher tolerance if the process fails
-        output = scipy.optimize.linprog(f, A, b, Aeq, beq, bounds=bounds,
-                               method='interior-point', callback=None, options={"sparse":True, "tol":tol})
-        status = output.status
-        if status>0:
-            tol = tol*10
-    if status>0:
+
+    output = scipy.optimize.linprog(f, A, b, Aeq, beq, bounds=bounds,
+                           method='highs', callback=None, options={"sparse":True, "tol":tol})
+
+    if output.status>0:
         messages.addWarningMessage("Quantile regression failure, check results for potential obvious error")
     newz = output.x[-n:]
 
