@@ -31,10 +31,10 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     z = []
     lastreach = None
     for cs in listcs:
-        x.append(cs.dist + reachdist)
-        z.append(max(cs.z_forws, minz)) # "Fill" with the downstream z value (so z never gets lower)
         if lastreach is not None and cs.reach != lastreach:
             reachdist += lastreach.length
+        x.append(cs.dist + reachdist)
+        z.append(max(cs.z_forws, minz))  # "Fill" with the downstream z value (so z never gets lower)
         lastreach = cs.reach
     x = np.array(x)
     z = np.array(z)
