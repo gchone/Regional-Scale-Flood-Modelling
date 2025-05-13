@@ -205,12 +205,15 @@ class _NumpyArrayFedObject(object):
 
 
     def __init__(self, numpyarray_holder, data):
-        # The object can be fed by an id, or by it's all row from the numpyarray
+        # The object can be fed by an id, or by its whole row from the numpyarray
         # Note: __dict__ is called to prevent infinite recursion linked with __getattr__/__setattr__
         self.__dict__["_numpyarray_holder"] = numpyarray_holder
 
         for attr, field in self._numpyarray_holder.dict_attr_fields.items():
-            self.__dict__[attr] = data[field]
+            if isinstance(data[field], np.ndarray):
+                self.__dict__[attr] = data[field][0]
+            else:
+                self.__dict__[attr] = data[field]
 
 
     def __setattr__(self, name, value):
@@ -322,6 +325,14 @@ class Reach(_NumpyArrayFedObject):
         else:
             return None
 
+    def get_point(self, distance, collection, tolerance = 0.01):
+        pt_list = collection._numpyarray[collection._numpyarray[collection.dict_attr_fields['reach_id']] == self.id]
+        for pt_dist in pt_list[collection.dict_attr_fields['dist']]:
+            if abs(pt_dist - distance) < tolerance:
+                id = pt_list[pt_list[collection.dict_attr_fields['dist']] == pt_dist][collection.dict_attr_fields['id']][0]
+                return collection._points[collection._points['id'] == id]['object'][0]
+        return None
+
     def add_point(self, distance, collection):
 
         #Find the max currently used id in the collection, and add 1
@@ -329,8 +340,8 @@ class Reach(_NumpyArrayFedObject):
         #Add a row in the two numpy arrays
         to_add = np.empty(1, dtype=collection._numpyarray.dtype)
         to_add[collection.dict_attr_fields['id']] = newid
-        to_add[collection.dict_attr_fields['dist']] = distance
         to_add[collection.dict_attr_fields['reach_id']] = self.id
+        to_add[collection.dict_attr_fields['dist']] = distance
         collection._numpyarray = np.append(collection._numpyarray, to_add)
         datapoint = DataPoint(collection, self, to_add)
         to_add = np.array([(newid, datapoint)], dtype=collection._points.dtype)
