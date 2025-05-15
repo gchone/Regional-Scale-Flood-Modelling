@@ -12,13 +12,13 @@ UTC = -4
 # First tool: Filter las or laz files by days of LiDAR acquisition
 LASfiles_preprocessing.execute_extract_bydays(input_laz_folder, UTC, bydays_folder)
 # Second tool: Ground points classification and filtering
-LASfileTimeExtractor.execute_groundclassification(bydays_folder, ground_folder)
+LASfiles_preprocessing.execute_groundclassification(bydays_folder, ground_folder)
 # Third tool: Merging together tiles of same day of LiDAR acquisition
-LASfileTimeExtractor.execute_mergelas(ground_folder, merged_folder)
+LASfiles_preprocessing.execute_mergelas(ground_folder, merged_folder)
 
 # Fourth tool: Las to raster conversion
 output_folder = r"D:\NRCAN2\FloodToolsOpenGIS\Test_LAS_GR\rasters"
-LASfileTimeExtractor.execute_lastoraster(merged_folder, output_folder, 1)
+LASfiles_preprocessing.execute_lastoraster(merged_folder, output_folder, 1)
 
 # Calculate the elapsed time
 end_time = time.time()
