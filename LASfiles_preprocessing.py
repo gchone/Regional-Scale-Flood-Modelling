@@ -136,13 +136,9 @@ def execute_lastoraster(input_folder, output_folder, cellsize):
     for file in las_files:
         full_path_input_file = os.path.join(input_folder, file)
         with laspy.open(full_path_input_file) as las:
-            # Read the point data
-            points = las.read()
             # Get the minimum x and y values
-            min_x = points.x.min()
-            min_y = points.y.min()
-            max_x = points.x.max()
-            max_y = points.y.max()
+            min_x, min_y, min_z = las.header.mins
+            max_x, max_y, max_z = las.header.maxs
             if snap_ref_x is None:
                 # If this is the first file, set the reference point to the min coordinates
                 snap_ref_x = min_x
