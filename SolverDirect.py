@@ -8,7 +8,7 @@ import warnings
 warnings.simplefilter("ignore", RuntimeWarning)
 
 from scipy.optimize import fsolve
-from scipy.optimize import minimize
+from scipy.optimize import minimize_scalar
 
 def manning_solver(cs):
 
@@ -53,9 +53,9 @@ def cs_solver(cs_up, cs_down, min_slope):
 
     def equations(y):
 
-        #if y < cs_tosolve.ycrit:
-        #    # constraint simulation
-        #    return 9999
+        if y < cs_tosolve.ycrit:
+            # constraint simulation
+            return float('inf')
         R = (cs_tosolve.width * y) / (cs_tosolve.width + 2 * y)
         v = cs_tosolve.Q / (cs_tosolve.width * y)
         s = (cs_tosolve.n ** 2 * v ** 2) / (R ** (4. / 3.))
@@ -69,8 +69,7 @@ def cs_solver(cs_up, cs_down, min_slope):
         energy = abs(energy)# + abs(cs_tosolve.wslidar - y - cs_ref.z)/(10*localdist)
         return energy
 
-
-    res = minimize(equations, cs_tosolve.ycrit, method='Nelder-Mead', bounds=[(cs_tosolve.ycrit, None)], options={'xatol':1e-3, 'fatol': 1e-3})
+    res = minimize_scalar(equations, method='brent', tol=1e-3)
 
     # Example of possible smoothing: y is changed according to local Fr and variation of Fr
     # y = res.x[0]
@@ -79,7 +78,7 @@ def cs_solver(cs_up, cs_down, min_slope):
     # weight = max(Fr, min(2*(Fr-cs_up.Fr)/cs_up.Fr, 1))
     # cs_tosolve.y = weight*y + (1-weight)*cs_up.y
 
-    cs_tosolve.y = res.x[0]
+    cs_tosolve.y = res.x
     cs_tosolve.R = (cs_tosolve.width * cs_tosolve.y) / (cs_tosolve.width + 2 * cs_tosolve.y)
     cs_tosolve.v = cs_tosolve.Q / (cs_tosolve.width * cs_tosolve.y)
     cs_tosolve.z = cs_tosolve.wslidar - cs_tosolve.y
