@@ -12,7 +12,7 @@ from scipy.optimize import minimize_scalar
 import math
 import warnings
 
-def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, slopesigma, slopefactor=1.0):
+def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, uncertaintyfactor, slopesigma, slopefactor):
 
     if prev_cs is None:
         minz = -math.inf
@@ -45,7 +45,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, slopesigma, slopefa
         local_sigma = max(local_sigma, 10)  # hardcoded: minimum standard deviation
 
         # Compute Gaussian weights using norm.pdf
-        weights = norm.pdf(distances, loc=distances[i], scale=local_sigma)
+        weights = norm.pdf(distances, loc=distances[i], scale=uncertaintysigma)
         weights /= weights.sum()  # Normalize weights
         # Uncertainty is calculated from:
         # - the absolute value of the carving (how much carving is done)
@@ -55,7 +55,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, slopesigma, slopefa
         # - The ratio between the carving and the differences between the elevations gives a measure of the uncertainty
         # relative to the slope
         # - Everything is multiplied by the weights from the Gaussian curve and summed to get the final uncertainty
-        corrections = sum(np.abs(carving) * weights)
+        corrections = sum(np.abs(carving) * weights)**uncertaintyfactor
         if corrections == 0:
             # If there is no carving, there are no smoothing to be made
             smoothed_values[i] = values[i]
@@ -119,7 +119,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, slopesigma, slopefa
     return
 
 
-def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=500, slope_sigma=100, slope_factor=2.0):
+def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=500 , uncertainty_sigma = 100, uncertainty_factor=1, slope_sigma=100, slope_factor=2.0):
 
     # The smoothing process :
     # - Removes bumps in the water surface profile following the quantile carving process of
@@ -159,7 +159,7 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
             # Stop when there is a DEM change or when we reach the last cs upstream
             if prev_DEM_ID is not None and prev_DEM_ID != cs.DEM_ID:
                 QuantileCarving(list_cs, prevcs_list, messages, tau=quantile)
-                Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, slope_sigma, slope_factor)
+                Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
                 list_cs = []
                 prevcs_list = None
                 restartdown = False
@@ -168,7 +168,7 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
 
             if isendreach and cs==endnode:
                 QuantileCarving(list_cs, prevcs_list, messages, tau=quantile)
-                Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, slope_sigma, slope_factor)
+                Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
                 list_cs = []
                 prev_DEM_ID = None
                 restartdown = True
