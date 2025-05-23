@@ -12,7 +12,7 @@ import warnings
 warnings.simplefilter("ignore", RuntimeWarning)
 
 from scipy.optimize import fsolve
-from scipy.optimize import minimize
+from scipy.optimize import minimize_scalar
 
 def manning_solver(cs):
 
@@ -48,9 +48,9 @@ def cs_solver(cs_up, cs_down):
 
     def equations(y):
 
-        # if y < cs_tosolve.ycrit_valid:
-        #     # constraint simulation
-        #     return 9999
+        if y < cs_tosolve.ycrit_valid:
+            # constraint simulation
+            return float('inf')
         R = (cs_tosolve.width * y) / (cs_tosolve.width + 2 * y)
         v = cs_tosolve.Q / (cs_tosolve.width * y)
         h = cs_tosolve.z + y
@@ -63,7 +63,8 @@ def cs_solver(cs_up, cs_down):
         energy = abs(energy)
         return energy
 
-    res = minimize(equations, cs_tosolve.ycrit_valid, method='Nelder-Mead', bounds=[(cs_tosolve.ycrit_valid, None)], options={'xatol': 1e-3, 'fatol': 1e-3})
+    res = minimize_scalar(equations, method='brent', tol=1e-3)
+
     # res, dict, ier, msg = fsolve(equations, cs_tosolve.ycrit, full_output=True)
     # ## if ier != 1, an error occured.
     # if ier != 1:
@@ -71,7 +72,7 @@ def cs_solver(cs_up, cs_down):
     # else:
     #     cs_tosolve.y = res[0]  # actual result of the solver
 
-    cs_tosolve.y_valid = res.x[0]
+    cs_tosolve.y_valid = res.x
     cs_tosolve.R_valid = (cs_tosolve.width * cs_tosolve.y_valid) / (cs_tosolve.width + 2 * cs_tosolve.y_valid)
     cs_tosolve.v_valid = cs_tosolve.Q / (cs_tosolve.width * cs_tosolve.y_valid)
     #cs_tosolve.h = cs_tosolve.z + cs_tosolve.y + cs_tosolve.v ** 2 / (2 * g)
