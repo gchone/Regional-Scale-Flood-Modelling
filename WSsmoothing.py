@@ -56,7 +56,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
         # relative to the slope
         # - Everything is multiplied by the weights from the Gaussian curve and summed to get the final uncertainty
         corrections = sum(np.abs(carving) * weights)**uncertaintyfactor
-        if corrections == 0:
+        if corrections < 1e-9:
             # If there is no carving, there are no smoothing to be made
             smoothed_values[i] = values[i]
         else:
