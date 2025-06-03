@@ -39,11 +39,13 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
     smoothed_values = np.zeros_like(values)
     uncertainty_vec = np.zeros_like(values)
     restricted = np.zeros_like(values)
+    sd2_vec = np.zeros_like(values)
+    local_sigma_vec = np.zeros_like(values)
     for i in range(len(values)):
-        # Gaussian curve size (sigma) is limited on the edges to avoid mismatch with downstream/upstream reaches
-        local_sigma = min(sigma, distances[i] - distances[0], distances[-1] - distances[i])
-        local_sigma = max(local_sigma, 10)  # hardcoded: minimum standard deviation
-
+        # Gaussian curve size (sigma) is limited on the edges to avoid mismatch with downstream reaches
+        local_sigma = min(sigma, (distances[i] - distances[0])*5.)  # hardcoded: 5 times the distance to the first point
+        local_sigma = max(local_sigma, 10.)  # hardcoded: minimum standard deviation
+        local_sigma_vec[i] = local_sigma
         # Compute Gaussian weights using norm.pdf
         weights = norm.pdf(distances, loc=distances[i], scale=uncertaintysigma)
         weights /= weights.sum()  # Normalize weights
@@ -104,10 +106,17 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
             else:
                 # First point, no previous point to compare
                 sd2 = uncertainty * local_sigma
+            sd2_vec[i] = sd2
             weights = norm.pdf(distances, loc=distances[i], scale=sd2)
             weights /= weights.sum()  # Normalize weights
             # Compute the weighted average
             smoothed_values[i] = np.sum(weights * values)
+
+            # Final check: if the smoothed value is lower than the previous one, we set it to the previous one
+            # It seems to happen sometimes although it should not. I could not find the reason why. Probably a numerical approximation in the optimization.
+            if i > 0 and smoothed_values[i] < smoothed_values[i - 1]:
+                smoothed_values[i] = smoothed_values[i - 1]
+                restricted[i] = restricted[i]+10
 
     # Assign the smoothed values to the cross-sections
     i = 0
@@ -115,6 +124,8 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
         cs.zsmoothed = smoothed_values[i]
         cs.ws_uncertainty = uncertainty_vec[i]
         cs.restricted = restricted[i]
+        cs.sd2 = sd2_vec[i]
+        cs.local_sigma = local_sigma_vec[i]
         i +=1
     return
 
@@ -179,7 +190,8 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
     collection.add_SavedVariable("ztosmooth", "float")
     collection.add_SavedVariable("ws_uncertainty", "float")
     collection.add_SavedVariable("restricted", "float")
-
+    collection.add_SavedVariable("sd2", "float")
+    collection.add_SavedVariable("local_sigma", "float")
     collection.save_points(output_points)
 
     return
