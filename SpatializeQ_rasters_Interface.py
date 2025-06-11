@@ -16,8 +16,8 @@ from SpatializeQ_rasters import *
 
 class SpatializeQ_rasters(object):
     def __init__(self):
-        self.label = "Spatialisation des débits selon le D8"
-        self.description = "Fournit des valeurs de débits le long des écoulements"
+        self.label = "Discharge spatialization along flow paths"
+        self.description = ""
         self.canRunInBackground = True
 
     def getParameterInfo(self):

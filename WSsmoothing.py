@@ -17,7 +17,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
     if prev_cs is None:
         minz = -math.inf
     else:
-        minz = prev_cs.zsmoothed
+        minz = prev_cs.zws_smoothed
 
     reachdist = 0
     distances = []
@@ -28,7 +28,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
         if lastreach is not None and cs.reach != lastreach:
             reachdist += lastreach.length
         distances.append(cs.dist + reachdist)
-        values.append(max(cs.ztosmooth, minz))  # "Fill" with the downstream z value (so z never gets lower)
+        values.append(max(cs.zws_quantilecarving, minz))  # "Fill" with the downstream z value (so z never gets lower)
         unbreached_values.append(cs.z_forws)
         lastreach = cs.reach
     distances = np.array(distances)
@@ -121,7 +121,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
     # Assign the smoothed values to the cross-sections
     i = 0
     for cs in listcs:
-        cs.zsmoothed = smoothed_values[i]
+        cs.zws_smoothed = smoothed_values[i]
         cs.ws_uncertainty = uncertainty_vec[i]
         cs.restricted = restricted[i]
         cs.sd2 = sd2_vec[i]
@@ -130,14 +130,15 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
     return
 
 
-def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=500 , uncertainty_sigma = 100, uncertainty_factor=1, slope_sigma=100, slope_factor=2.0):
+def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True):
 
-    # The smoothing process :
+    # The process:
     # - Removes bumps in the water surface profile following the quantile carving process of
     #   Schwanghart and Scherler (2017). See QuantileRegression.py for details.
     # - Smooths the river profile. Smoothing is done with a Gaussian moving average, where the amount of smoothing (i.e.
     # the standard deviation of the gaussian curve), is parametered by the amount of correction done during the quantile
     # carving process and the local slope.
+
 
     network = RiverNetwork()
     network.dict_attr_fields['id'] = RID_field
@@ -170,7 +171,8 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
             # Stop when there is a DEM change or when we reach the last cs upstream
             if prev_DEM_ID is not None and prev_DEM_ID != cs.DEM_ID:
                 QuantileCarving(list_cs, prevcs_list, messages, tau=quantile)
-                Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
+                if smoothing:
+                    Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
                 list_cs = []
                 prevcs_list = None
                 restartdown = False
@@ -179,19 +181,21 @@ def execute_WSsmoothing(network_shp, links_table, RID_field, order_field, datapo
 
             if isendreach and cs==endnode:
                 QuantileCarving(list_cs, prevcs_list, messages, tau=quantile)
-                Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
+                if smoothing:
+                    Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
                 list_cs = []
                 prev_DEM_ID = None
                 restartdown = True
             prev_cs = cs
 
+    if smoothing:
+        collection.add_SavedVariable("zws_smoothed", "float")
+        #collection.add_SavedVariable("ws_uncertainty", "float")
+        #collection.add_SavedVariable("restricted", "float")
+        #collection.add_SavedVariable("sd2", "float")
+        #collection.add_SavedVariable("local_sigma", "float")
+    collection.add_SavedVariable("zws_quantilecarving", "float")
 
-    collection.add_SavedVariable("zsmoothed", "float")
-    collection.add_SavedVariable("ztosmooth", "float")
-    collection.add_SavedVariable("ws_uncertainty", "float")
-    collection.add_SavedVariable("restricted", "float")
-    collection.add_SavedVariable("sd2", "float")
-    collection.add_SavedVariable("local_sigma", "float")
     collection.save_points(output_points)
 
     return
