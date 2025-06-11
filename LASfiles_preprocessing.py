@@ -8,6 +8,7 @@ import json
 import subprocess
 import scipy.interpolate
 from osgeo import gdal
+import re
 gdal.UseExceptions()
 
 def gps_week_to_datetime(gps_time, gps_week_start):
@@ -122,6 +123,109 @@ def execute_mergelas(input_folder, output_folder):
         pipeline = {"pipeline": pipeline}
         # Run PDAL pipeline
         subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
+
+def execute_mergeandconvert(input_folder, output_folder, cellsize):
+    def parse_filename_ON(filename):
+        """
+        Parse the filename to extract UTM17 coordinates (AAA and BBBB).
+        """
+        match = re.match(r"1km..(\d{3})0(\d{4})020..LLAKEERIE\.las", filename)
+        if match:
+            x = int(match.group(1)) * 1000
+            y = int(match.group(2)) * 1000
+            return x, y
+        return None
+
+
+    def find_neighbors_ON(files, x, y):
+        """
+        Find neighboring files based on UTM17 coordinates.
+        """
+        neighbors = []
+        for file in files:
+            coords = parse_filename_ON(file)
+            if coords:
+                nx, ny = coords
+                if abs(nx - x) <= 1000 and abs(ny - y) <= 1000:  # Neighboring tiles
+                    neighbors.append(file)
+        return neighbors
+
+
+    daydict = {} # Let's create a dictionnary with the day of lidar acquisition as key and list of las files
+    for r, d, f in os.walk(input_folder):
+        for file in f:
+            if (file[-4:] == '.laz' or file[-4:] == '.las'):
+                day = r[len(input_folder)+1:]
+                if day not in daydict.keys():
+                    daydict[day] = []
+                daydict[day].append(file)
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    for day, laslist in daydict.items():
+        print(day)
+        print(laslist)
+
+        if not os.path.exists(os.path.join(output_folder, day)):
+            os.makedirs(os.path.join(output_folder, day))
+
+        snap_ref_x = None
+        snap_ref_y = None
+        # Process each LAS file
+        for file in laslist:
+            full_path_input_file = os.path.join(input_folder, day, file)
+            with laspy.open(full_path_input_file) as las:
+                # Get the minimum x and y values
+                min_x, min_y, min_z = las.header.mins
+                max_x, max_y, max_z = las.header.maxs
+                if snap_ref_x is None:
+                    # If this is the first file, set the reference point to the min coordinates
+                    snap_ref_x = min_x
+                    snap_ref_y = min_y
+                else:
+                    # Snap the min coordinates values to the reference point
+                    min_x = snap_ref_x - math.ceil((snap_ref_x - min_x) / cellsize) * cellsize
+                    min_y = snap_ref_y - math.ceil((snap_ref_y - min_y) / cellsize) * cellsize
+
+            output_rasterfile = os.path.join(output_folder, day, file[:-4] + ".tif")
+
+            coords = parse_filename_ON(file)
+            x, y = coords
+            neighbors = find_neighbors_ON(laslist, x, y)
+            print(file)
+            print(neighbors)
+            # Define the PDAL pipeline
+            neighbors_full_path = [os.path.join(input_folder, day, neighbor) for neighbor in neighbors]
+            pipeline = neighbors_full_path
+            pipeline.append({
+                        "type": "filters.merge"
+                    })
+            pipeline.append({
+                "type": "filters.delaunay"  # Create a TIN from the LAS points
+            })
+            pipeline.append( {
+                        "type": "filters.faceraster",  # Interpolate the TIN to create a raster
+                        "resolution": cellsize,  # Set the raster resolution (cell size)
+                        "origin_x": min_x,  # Set the origin of the raster
+                        "origin_y": min_y,
+                        "width": math.ceil((max_x - min_x) / cellsize),  # Set the width of the raster
+                        "height": math.ceil((max_y - min_y) / cellsize)  # Set the height of the raster
+                    })
+            pipeline.append({
+                        "type": "writers.raster",  # Save the raster as a GeoTIFF
+                        "filename": output_rasterfile,
+                        "gdaldriver": "GTiff",  # Use GeoTIFF format
+                        "data_type": "Float32"  # Set the data type of the raster
+                    })
+            pipeline = {
+                "pipeline": pipeline
+            }
+            print(pipeline)
+            # Run the PDAL pipeline
+            result = subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True,
+                                    capture_output=True)
+            print(result.stderr)
+
 
 def execute_lastoraster(input_folder, output_folder, cellsize):
     # List all LAS files in the input folder
