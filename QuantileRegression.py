@@ -24,7 +24,7 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     if prevcs is None:
         minz = -math.inf
     else:
-        minz = prevcs.ztosmooth
+        minz = prevcs.zws_quantilecarving
 
     reachdist = 0
     x = []
@@ -75,6 +75,6 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     newz = output.x[-n:]
 
     for i in range(0, n):
-        listcs[i].ztosmooth = newz[i]
+        listcs[i].zws_quantilecarving = newz[i]
 
 

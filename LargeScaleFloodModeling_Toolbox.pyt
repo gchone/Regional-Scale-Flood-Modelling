@@ -2,7 +2,6 @@
 
 import arcpy
 
-from LASfileTimeExtractor_Interface import *
 from RelateNetworks_Interface import *
 from LocatePointsAlongRoutes_Interface import *
 from LargeurParTransect_Interface import *
@@ -10,8 +9,8 @@ from DEMprocessing_Interface import *
 from PlacePointsAlongReaches_Interface import *
 from AssignPointToClosestPointOnRoute_Interface import *
 from CreateTreeFromShapefile_Interface import *
-from ChannelCorrection_Interface import *
-#from WSsmoothing_Interface import *
+#from ChannelCorrection_Interface import *
+from WSsmoothing_Interface import *
 from TreeFromFlowDir_Interface import *
 from CreateFromPointsAndSplits_Interface import *
 from LocateMostDownstreamPoints_Interface import *
@@ -30,8 +29,8 @@ from SpatializeQ_rasters_Interface import *
 class Toolbox(object):
     def __init__(self):
 
-        self.label = "Tools for linear referencing"
+        self.label = "Large Scale Flood Modeling Toolbox"
         self.alias = ""
 
-        self.tools = [SpatializeQ_rasters, BridgeCorrection, D8toD4, RunSim_LISFLOOD, DefBciWithLateralWlakes_hdown, CreateZonesWlakes, LASfileTimeExtractor, TopologicalRelateNetworks, BedAssessmentIterations, DownstreamSlope, InterpolatePoints, FlowDirForWS, RelateNetworks, LocatePointsAlongRoutes, LargeurParTransect, BatchAggregate, PlacePointsAlongReaches, AssignPointToClosestPointOnRoute, CreateTreeFromShapefile, ChannelCorrection, TreeFromFlowDir, CreateFromPointsAndSplits, LocateMostDownstreamPoints]
+        self.tools = [SpatializeQ_rasters, BridgeCorrection, D8toD4, RunSim_LISFLOOD, DefBciWithLateralWlakes_hdown, CreateZonesWlakes, TopologicalRelateNetworks, BedAssessmentIterations, DownstreamSlope, InterpolatePoints, FlowDirForWS, RelateNetworks, LocatePointsAlongRoutes, LargeurParTransect, BatchAggregate, PlacePointsAlongReaches, AssignPointToClosestPointOnRoute, CreateTreeFromShapefile, TreeFromFlowDir, CreateFromPointsAndSplits, LocateMostDownstreamPoints, WSsmoothing]
 

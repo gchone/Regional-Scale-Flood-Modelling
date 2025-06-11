@@ -16,6 +16,7 @@ from SpatializeQ_rasters import *
 
 class SpatializeQ_rasters(object):
     def __init__(self):
+
         self.label = "D8 discharge spatialization"
         self.description = "Simple spatialization of discharges from points to raster using flow direction and flow accumulation rasters."
         self.canRunInBackground = True
