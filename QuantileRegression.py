@@ -13,18 +13,18 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     #    [DOI: 10.5194/esurf-5-821-2017]
     # Code was adapted from their Matlab code:
     # https://github.com/wschwanghart/topotoolbox/
+    #
+    # A new attribute with the resulting water surface, ztosmooth, is added to the cross-sections in listcs
         
     # Converting the listcs into two arrays:
     # x and z are arrays of the same size with the distance and the elevations values
     #x = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
     #z = np.array([1., 2., 3., 2., 5., 4.])
 
-    tol = 0.000001  # Tolerance is hard-coded, at 10^-6
-
     if prevcs is None:
         minz = -math.inf
     else:
-        minz = prevcs.ztosmooth
+        minz = prevcs.zws_quantilecarving
 
     reachdist = 0
     x = []
@@ -68,13 +68,13 @@ def QuantileCarving(listcs, prevcs, messages, tau=0.5):
     b = np.zeros((n,1))
 
     output = scipy.optimize.linprog(f, A, b, Aeq, beq, bounds=bounds,
-                           method='highs', callback=None, options={"sparse":True, "tol":tol})
+                           method='highs', callback=None)
 
     if output.status>0:
         messages.addWarningMessage("Quantile regression failure, check results for potential obvious error")
     newz = output.x[-n:]
 
     for i in range(0, n):
-        listcs[i].ztosmooth = newz[i]
+        listcs[i].zws_quantilecarving = newz[i]
 
 

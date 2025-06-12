@@ -43,7 +43,7 @@ def execute_OrderReaches(routes, links, RID_field, r_flowacc, routeD8, linksD8, 
 
     execute_OrderTreeByFlowAcc(routes, links, RID_field, QpointsMain, "id", "RID", "MEAS", "flowacc", outputfield)
 
-def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m, RID_field_3m, relatetable, pts_table, X_field_pts, Y_field_pts, lidar3m_cor, lidar3m_forws, DEMs_footprints, DEMs_field, pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, ouput_table, messages):
+def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m, RID_field_3m, relatetable, pts_table, X_field_pts, Y_field_pts, lidar3m_cor, DEMs_footprints, DEMs_field, pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, ouput_table, messages):
     # 2021-10-19 Assignation of elevation on points on routes (AssignPointToClosestPointOnRoute) done by "2-WAY CLOSEST" instead of "MEAN"
     #  relate table externalised, and inverted
 
@@ -53,28 +53,27 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
     #RID3m_field_in_relatetable = [f.name for f in arcpy.Describe(relatetable).fields][-2]
 
     arcpy.MakeXYEventLayer_management (pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
-    arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor, lidar3m_forws])
+    arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
 
     arcpy.AddJoin_management("pts_layer", RID_field_3m, relatetable, RID_field_3m)
 
     pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
 
-    lidar3m_cor_basename = str(arcpy.Describe(lidar3m_cor).basename)
-    lidar3m_forws_basename = str(arcpy.Describe(lidar3m_forws).basename)
+    lidar3m_forws_basename = str(arcpy.Describe(lidar3m_cor).basename)
 
-    execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_cor_basename, lidar3m_forws_basename],
+    execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_forws_basename],
                                              routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
                                              [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
                                              [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
     pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
-    execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_cor_basename, lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
+    execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
 
     arcpy.MakeRouteEventLayer_lr(routes, RID_field, pts_interpolated, pts_bathy_RID_field + " POINT "+pts_bathy_dist_field, "interpolated_lyr")
 
     interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
     arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
 
-    execute_WSsmoothing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_cor_basename, lidar3m_forws_basename, DEMs_field, ouput_table, messages)
+    execute_WSprocessing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_forws_basename, DEMs_field, ouput_table, messages)
 
 def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints_D8, outpoints_route, messages):
 
