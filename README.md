@@ -7,7 +7,7 @@ These tools implement the large-scale flood modelling process described in:
 * **Choné, G., Mazgareanu, I., Biron, P.M., Buffin-Bélanger, T., Larouche-Tremblay, F., Perry, B., and Fortin, M.** (2024). *Large-scale flood modelling based on LiDAR data: a case study in the Southwest Miramichi watershed, New Brunswick, Canada.* Canadian Water Resources Journal, 1–19. [https://doi.org/10.1080/07011784.2024.2430776](https://doi.org/10.1080/07011784.2024.2430776)
 
 These tools include the bed assessment procedure, integrated with ArcGIS tools and data structures to support the development of large-scale hydraulic models from LiDAR data.
-A stand-alone version of the bed assessment procedure (not requiring ArcGIS) is available upon request.
+A stand-alone version of the bed assessment procedure (not requiring ArcGIS) is available in the repository ConcordiaRiverLab-BedAssessment.
 
 ---
 
