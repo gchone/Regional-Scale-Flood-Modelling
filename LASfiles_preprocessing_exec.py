@@ -10,11 +10,10 @@ bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday_2018_05_02"
 # First tool: Filter las or laz files by days of LiDAR acquisition
 #LASfiles_preprocessing.execute_extract_bydays(input_laz_folder, UTC, bydays_folder)
 
-bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday_for2018_05_02\2018-05-02"
 ground_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\lastools_class2only"
 str_binlastoolsfolder = r"D:\lastools\LAStools\bin"
 # Second tool: Ground points classification and filtering
-#LASfiles_preprocessing.execute_groundclassification(str_binlastoolsfolder, bydays_folder, ground_folder)
+LASfiles_preprocessing.execute_groundclassification(str_binlastoolsfolder, bydays_folder, ground_folder)
 
 ## For Ontario dataset: converting LAS files to raster by tile before merging the tiles by day of LiDAR aquisition ##
 ## Note that LASfiles_preprocessing.execute_convertbytile rely on the naming convention of the Ontario dataset to find
