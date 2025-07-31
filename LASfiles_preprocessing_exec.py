@@ -3,89 +3,35 @@ import LASfiles_preprocessing
 import time
 
 start_time = time.time()
-input_laz_folder = r"D:\NRCAN2\FloodToolsOpenGIS\Test_LAS_GR\Laz_files"
-bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\Test_LAS_GR\bydays"
-ground_folder = r"D:\NRCAN2\FloodToolsOpenGIS\Test_LAS_GR\ground"
-merged_folder = r"D:\NRCAN2\FloodToolsOpenGIS\Test_LAS_GR\merged"
+
 UTC = -4
-
-input_laz_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\origlas"
-bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday"
-
 input_laz_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\origlas_2018_05_02"
-bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday_for2018_05_02"
+bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday_2018_05_02"
 # First tool: Filter las or laz files by days of LiDAR acquisition
 #LASfiles_preprocessing.execute_extract_bydays(input_laz_folder, UTC, bydays_folder)
+
+bydays_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday_for2018_05_02\2018-05-02"
+ground_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\lastools_class2only"
+str_binlastoolsfolder = r"D:\lastools\LAStools\bin"
 # Second tool: Ground points classification and filtering
-#LASfiles_preprocessing.execute_groundclassification(bydays_folder, ground_folder)
+#LASfiles_preprocessing.execute_groundclassification(str_binlastoolsfolder, bydays_folder, ground_folder)
+
+## For Ontario dataset: converting LAS files to raster by tile before merging the tiles by day of LiDAR aquisition ##
+## Note that LASfiles_preprocessing.execute_convertbytile rely on the naming convention of the Ontario dataset to find
+## the position of the tiles in the UTM17 coordinate system. This script needs to be adapted in order for it to work
+## for other datasets. ##
+output_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\rasters_2018_05_02"
+ref_raster = R"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\lasground_1km175470483702018LLAKEERIE.tif"
+# Third tool: Convert LAS files to raster by tile
+LASfiles_preprocessing.execute_convertbytile(ground_folder, output_folder, ref_raster, 1)
+
+# Fourth tool: Merge rasters (by tiles) into a single raster for each day of LiDAR acquisition
+#   not implemented in Python. Can be done with ArcGIS Pro or QGIS.
+
+
+## For smaller dataset than the Ontario one: merging LAS files by day and converting to raster ##
 # Third tool: Merging together tiles of same day of LiDAR acquisition
 #LASfiles_preprocessing.execute_mergelas(ground_folder, merged_folder)
-
-ground_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario"
-output_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario_testrasters"
-
-ground_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\lastools_class2only"
-output_folder = r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\lastools_dems"
-
-#LASfiles_preprocessing.execute_mergeandconvert(ground_folder, output_folder, 1)
-
-pipeline = {
-                    "pipeline": [
-                        r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\byday_for2018_05_02\2018-05-02\2018-05-02\1km175470483702018LLAKEERIE.laz",
-                        {
-                            "type": "filters.assign",
-                            "value": "Classification = 0"
-                        },
-                        {
-                            "type": "filters.elm"
-                        },
-                        {
-                            "type": "filters.outlier"
-                        },
-                        {
-                            "type": "filters.smrf",
-                            "where":"!(Classification == 7)",
-                            # "slope":0.15,
-                            # "window": 18
-                            # "threshold": 0.5,
-                            # "scalar": 1.25,
-                            # "cell": 1.0,
-                            # "cut": 0.0
-                        },
-                        {
-                            "type":"filters.expression",
-                            "expression":"Classification == 2"
-                        },
-                        r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\test_smrf2.las"
-    ]
-                }
-# Run PDAL pipeline
-
-import subprocess, json
-subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
-print("LAS classification done")
-
-pipeline = {"pipeline": [
-                        r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\test_smrf2.las",
-                        {
-                        "type": "filters.delaunay"  # Create a TIN from the LAS points
-                        },
-                        {
-                        "type": "filters.faceraster",  # Interpolate the TIN to create a raster
-                        "resolution": 1
-                        },
-                        {
-                        "type": "writers.raster",  # Save the raster as a GeoTIFF
-                        "filename": r"D:\NRCAN2\FloodToolsOpenGIS\LAS_Ontario\test_smrf2_raster.tif",
-                        "gdaldriver": "GTiff",  # Use GeoTIFF format
-                        "data_type": "Float32"  # Set the data type of the raster
-                         }
-                        ]
-                }
-subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
-
-
-
 # Fourth tool: Las to raster conversion
 #LASfiles_preprocessing.execute_lastoraster(merged_folder, output_folder, 1)
 

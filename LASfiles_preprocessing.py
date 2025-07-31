@@ -15,7 +15,17 @@ def gps_week_to_datetime(gps_time, gps_week_start):
     return gps_week_start + timedelta(seconds=gps_time)
 
 def execute_extract_bydays(str_lasfolder, UTC, output_folder):
+    # This function extracts LAS files by days of LiDAR acquisition based on GPS time.
+    # It creates a folder structure with the day as the folder name and saves the LAS files accordingly.
+    # @param str_lasfolder: Path to the folder containing LAS files.
+    # @param UTC: UTC offset in hours (e.g., -4 for Eastern Daylight Time).
+    # @param output_folder: Path to the folder where the output files will be saved.
 
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Vectorize the date extraction for efficiency
+    import numpy as np
     day_vec = np.vectorize(lambda t: t.date())
     las_files = [f for f in os.listdir(str_lasfolder) if (f.endswith(".las") or f.endswith(".laz"))]
     for file in las_files:
@@ -71,60 +81,55 @@ def execute_extract_bydays(str_lasfolder, UTC, output_folder):
                 # subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
 
 
-def execute_groundclassification(input_folder, ground_folder):
-    filelist = []
-    outputlist = []
-    for r, d, f in os.walk(input_folder):
-        for file in f:
-            if (file[-4:] == '.laz' or file[-4:] == '.las'):
-                filelist.append(os.path.join(r, file))
-                outputfolder = os.path.join(ground_folder, r[len(input_folder)+1:])
-                outputlist.append(os.path.join(outputfolder, file[:-4]+".las"))
-                if not os.path.exists(outputfolder):
-                    os.makedirs(outputfolder)
-                pipeline = {
-                    "pipeline": [
-                        os.path.join(r, file),
-                        {
-                            "type": "filters.smrf",  # Simple Morphological Filter for ground classification
-                            #Example parameters:
-                            # "scalar": 1.2,
-                            # "slope": 0.2,
-                            # "window": 33,
-                            # "threshold": 0.45
-                        },
-                        {
-                            "type": "filters.range",
-                            "limits": "Classification[2:2]"
-                        },
-                        os.path.join(outputfolder, file[:-4]+".las")
-                    ]
-                }
-                # Run PDAL pipeline
-                subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
+def execute_groundclassification(str_binlastoolsfolder, input_folder, ground_folder):
+    # This function classifies ground points in LAS files using LAStools' lasground_new64.exe.
+    # Keeps only ground points (class 2) and saves them in a new folder structure.
+    # @param str_binlastoolsfolder: Path to the folder containing the LAStools binaries.
+    # @param input_folder: Path to the folder containing the input LAS files (= output of execute_extract_bydays).
+    # @param ground_folder: Path to the folder where the ground classified LAS files will be saved.
 
-def execute_mergelas(input_folder, output_folder):
+    if not os.path.exists(ground_folder):
+        os.makedirs(ground_folder)
 
-    daydict = {} # Let's create a dictionnary with the day of lidar acquisition as key and list of las files
-    for r, d, f in os.walk(input_folder):
-        for file in f:
-            if (file[-4:] == '.laz' or file[-4:] == '.las'):
-                day = r[len(input_folder)+1:]
-                if day not in daydict.keys():
-                    daydict[day] = []
-                daydict[day].append(os.path.join(r, file))
+    folders = [f for f in os.listdir(input_folder) if os.path.isdir(os.path.join(input_folder, f))]
+    for folder in folders:
+        outputfolder = os.path.join(ground_folder, folder)
+        if not os.path.exists(outputfolder):
+            os.makedirs(outputfolder)
 
-    for day, laslist in daydict.items():
-        pipeline = laslist.copy()
-        pipeline.append({
-                    "type": "writers.las",
-                    "filename": os.path.join(output_folder, day+".las")
-                })
-        pipeline = {"pipeline": pipeline}
-        # Run PDAL pipeline
-        subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
+        p = subprocess.Popen(
+            [str_binlastoolsfolder + "\\lasground_new64.exe", "-i", os.path.join(input_folder, folder, "*.la?"), "-odir",
+             outputfolder, "-keep_class", "2"], cwd=input_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        out, err = p.communicate()  # make the script wait for the lasground to be done
 
-def execute_mergeandconvert(input_folder, output_folder, cellsize):
+def execute_convertbytile(input_folder, output_folder, ref_raster, cellsize = None):
+    # Convert LAS files into DEMs with preliminary merging of the neighboring tiles.
+    # This function was written for the Ontario LiDAR dataset, which has a specific naming convention for the LAS files.
+    # It would need to be adapted for other datasets with different naming conventions.
+    # @param input_folder: Path to the folder containing the input LAS files (= output of execute_groundclassification).
+    # @param output_folder: Path to the folder where the output rasters will be saved.
+    # @param ref_raster: Path to the reference raster file used for snapping the output rasters.
+    # @param cellsize: Resolution of the output rasters. If None, it will be taken from the reference raster.
+    #   Note that this function requires the cell size of the reference raster to be the same on the X and Y axes.
+
+    # ref_raster is used to determine the cell size and the reference point for snapping.
+    refdataset = gdal.Open(ref_raster)
+    if not refdataset:
+        raise FileNotFoundError(f"Unable to open raster file: {ref_raster}")
+    # Get the geotransform
+    geotransform = refdataset.GetGeoTransform()
+    if not geotransform:
+        raise ValueError("Geotransform is not available for the raster file.")
+    # Extract minimum x, minimum y, and cell size
+    snap_ref_x = geotransform[0]  # Top-left x coordinate
+    snap_ref_y = geotransform[3]  # Top-left y coordinate
+    if cellsize is None:
+        cell_size_x = geotransform[1]  # Pixel width
+        cell_size_y = abs(geotransform[5])  # Pixel height (absolute value)
+        if cell_size_x != cell_size_y:
+            raise ValueError("The reference raster must have the same cell size on both X and Y axes.")
+        cellsize = (cell_size_x + cell_size_y) / 2  # Average cell size
+
     def parse_filename_ON(filename):
         """
         Parse the filename to extract UTM17 coordinates (AAA and BBBB).
@@ -163,37 +168,28 @@ def execute_mergeandconvert(input_folder, output_folder, cellsize):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     for day, laslist in daydict.items():
-        print(day)
-        print(laslist)
 
         if not os.path.exists(os.path.join(output_folder, day)):
             os.makedirs(os.path.join(output_folder, day))
 
-        snap_ref_x = None
-        snap_ref_y = None
         # Process each LAS file
         for file in laslist:
+            print(day+"/"+file)
             full_path_input_file = os.path.join(input_folder, day, file)
             with laspy.open(full_path_input_file) as las:
-                # Get the minimum x and y values
+                # Get the minimum x and y values of the LAS file
                 min_x, min_y, min_z = las.header.mins
                 max_x, max_y, max_z = las.header.maxs
-                if snap_ref_x is None:
-                    # If this is the first file, set the reference point to the min coordinates
-                    snap_ref_x = min_x
-                    snap_ref_y = min_y
-                else:
-                    # Snap the min coordinates values to the reference point
-                    min_x = snap_ref_x - math.ceil((snap_ref_x - min_x) / cellsize) * cellsize
-                    min_y = snap_ref_y - math.ceil((snap_ref_y - min_y) / cellsize) * cellsize
+                # Snap to the reference raster
+                min_x = snap_ref_x - math.ceil((snap_ref_x - min_x) / cellsize) * cellsize
+                min_y = snap_ref_y - math.ceil((snap_ref_y - min_y) / cellsize) * cellsize
 
             output_rasterfile = os.path.join(output_folder, day, file[:-4] + ".tif")
 
             coords = parse_filename_ON(file)
             x, y = coords
             neighbors = find_neighbors_ON(laslist, x, y)
-            print(file)
-            print(neighbors)
+
             # Define the PDAL pipeline
             neighbors_full_path = [os.path.join(input_folder, day, neighbor) for neighbor in neighbors]
             pipeline = neighbors_full_path
@@ -220,15 +216,44 @@ def execute_mergeandconvert(input_folder, output_folder, cellsize):
             pipeline = {
                 "pipeline": pipeline
             }
-            print(pipeline)
+
             # Run the PDAL pipeline
             result = subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True,
                                     capture_output=True)
-            print(result.stderr)
 
+
+def execute_mergelas(input_folder, output_folder):
+    # Merge all LAS files by day of LiDAR acquisition into a single LAS file per day.
+
+    # This function should not used for large datasets, as it creates a single file that is too large to handle.
+    # Instead, execute_convertbytile should be used in order to convert LAS files into DEMs with preliminary merging
+    # of the neighboring tiles. Then, the DEMs by tiles can be merged together.
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    daydict = {} # Let's create a dictionnary with the day of lidar acquisition as key and list of las files
+    for r, d, f in os.walk(input_folder):
+        for file in f:
+            if (file[-4:] == '.laz' or file[-4:] == '.las'):
+                day = r[len(input_folder)+1:]
+                if day not in daydict.keys():
+                    daydict[day] = []
+                daydict[day].append(os.path.join(r, file))
+
+    for day, laslist in daydict.items():
+        pipeline = laslist.copy()
+        pipeline.append({
+                    "type": "writers.las",
+                    "filename": os.path.join(output_folder, day+".las")
+                })
+        pipeline = {"pipeline": pipeline}
+        # Run PDAL pipeline
+        subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
 
 def execute_lastoraster(input_folder, output_folder, cellsize):
-    # List all LAS files in the input folder
+    # Convert LAS files into DEMs by creating a TIN from the LAS points and then interpolating the TIN to create a raster.
+    # To be used after execute_mergelas
     las_files = [f for f in os.listdir(input_folder) if f.endswith(".las")]
 
     if not os.path.exists(output_folder):
