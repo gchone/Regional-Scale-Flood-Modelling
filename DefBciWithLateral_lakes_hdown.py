@@ -14,7 +14,7 @@
 # v1.5 - Octobre 2019 - version modifiée pour simulations de l'amont vers l,aval avec reprise de l'élévation aval comme condition limite:
 # v1.6 - Octobre 2019 - Débits ajustés jusqu'à la fin de la zone
 # v1.7 - Mai 2020 - Séparation de l'interface - Adaption à CreateZones v1.6 - Fusion avec PrepaSim
-# v1.8 - Aout 2020 - Débogage fenêtre de sortie
+# v1.8 - Aoput 2020 - Débogage fenêtre de sortie
 
 import os
 
@@ -220,6 +220,143 @@ def execute_DefBCI(r_flowdir, r_flowacc, distoutput, percent, str_zonesfolder,
 
 
 
+    ### Début de traitement pour la configuration des fenêtres de sortie ###
+
+    # Pour chaque point de sortie
+    for point in listoutputpoints:
+        raster = RasterIO(arcpy.Raster(str_zonesfolder + r"\zone" + str(point.numzone)))
+        colinc = 0
+        rowinc = 0
+        distinc = 0
+        point.side2 = "0"
+        point.lim3 = 0
+        point.lim4 = 0
+        # Selon le coté de sortie, on progressera horizontalement ou verticalement
+        if point.side == "W" or point.side == "E":
+            rowinc = 1
+            distinc = raster.raster.meanCellHeight
+        else:
+            colinc = 1
+            distinc = raster.raster.meanCellWidth
+        currentcol = raster.XtoCol(point.X)
+        currentrow = raster.YtoRow(point.Y)
+        distance = 0
+        # On progresse sur dans une direction jusqu'à sortir du raster ou jusqu'à ce que la distance voullue soit attente
+        while (not (currentcol < 0 or currentcol >= raster.raster.width or currentrow < 0 or currentrow >= raster.raster.height)) \
+                and raster.getValue(currentrow,currentcol) != raster.nodata and distance < distoutput/2:
+            distance += distinc
+            currentrow += rowinc
+            currentcol += colinc
+        # On prends les coordonnées avant de sortir du raster
+        currentrow -= rowinc
+        currentcol -= colinc
+        if point.side == "W" or point.side == "E":
+            point.lim1 = raster.RowtoY(currentrow)
+        else:
+            point.lim1 = raster.ColtoX(currentcol)
+        # Si la procédure s'est arrêtée parce qu'on est sorti du raster, on tourne de 90 degrés et on continue
+        if distance < distoutput / 2:
+            distance -= distinc
+            if point.side == "W":
+                colinc = 1
+                rowinc = 0
+                distinc = raster.raster.meanCellWidth
+                point.lim3 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+            elif point.side == "E":
+                colinc = -1
+                rowinc = 0
+                distinc = raster.raster.meanCellWidth
+                point.lim3 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+
+            elif point.side == "N":
+                rowinc = 1
+                colinc = 0
+                distinc = raster.raster.meanCellHeight
+                point.lim3 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+            elif point.side == "S":
+                rowinc = -1
+                colinc = 0
+                distinc = raster.raster.meanCellHeight
+                point.lim3 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+            # On progresse à nouveau jusqu'à sortir du raster ou jusqu'à ce que la distance voullue soit attente
+            while (not (currentcol < 0 or currentcol >= raster.raster.width or currentrow < 0 or currentrow >= raster.raster.height)) \
+                    and raster.getValue(currentrow, currentcol) != raster.nodata and distance < distoutput / 2:
+                distance += distinc
+                currentrow += rowinc
+                currentcol += colinc
+            currentrow -= rowinc
+            currentcol -= colinc
+            # On cherche sur quel coté on est après avoir tourné de 90 degrés
+            if point.side == "W" or point.side == "E":
+                point.side2 = "S"
+                point.lim4 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+            else:
+                point.side2 = "E"
+                point.lim4 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+
+        # On recommence toute la procédure de l'autre côté du point de sortie
+        colinc = 0
+        rowinc = 0
+        distinc = 0
+        if point.side == "W" or point.side == "E":
+            rowinc = -1
+            distinc = raster.raster.meanCellHeight
+        else:
+            colinc = -1
+            distinc = raster.raster.meanCellWidth
+        currentcol = raster.XtoCol(point.X)
+        currentrow = raster.YtoRow(point.Y)
+        distance = 0
+        while (not (currentcol < 0 or currentcol >= raster.raster.width or currentrow < 0 or currentrow >= raster.raster.height)) \
+                and raster.getValue(currentrow, currentcol) != raster.nodata and distance < distoutput / 2:
+            distance += distinc
+            currentrow += rowinc
+            currentcol += colinc
+        currentrow -= rowinc
+        currentcol -= colinc
+        if point.side == "W" or point.side == "E":
+            point.lim2 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+        else:
+            point.lim2 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+        # Si la procédure s'est arrêtée parce qu'on est sorti du raster, on tourne de 90 degrés et on continue
+        if distance < distoutput / 2:
+            distance -= distinc
+            if point.side == "W":
+                colinc = 1
+                rowinc = 0
+                distinc = raster.raster.meanCellWidth
+                point.lim3 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+            elif point.side == "E":
+                colinc = -1
+                rowinc = 0
+                distinc = raster.raster.meanCellWidth
+                point.lim3 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+            elif point.side == "N":
+                rowinc = 1
+                colinc = 0
+                distinc = raster.raster.meanCellHeight
+                point.lim3 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+            elif point.side == "S":
+                rowinc = -1
+                colinc = 0
+                distinc = raster.raster.meanCellHeight
+                point.lim3 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+            while (not (currentcol < 0 or currentcol >= raster.raster.width or currentrow < 0 or currentrow >= raster.raster.height)) \
+                and raster.getValue(currentrow, currentcol) != raster.nodata and distance < distoutput / 2:
+                distance += distinc
+                currentrow += rowinc
+                currentcol += colinc
+            currentrow -= rowinc
+            currentcol -= colinc
+            if point.side == "W" or point.side == "E":
+                point.side2 = "N"
+                point.lim4 = raster.raster.extent.XMin + (currentcol + 0.5) * raster.raster.meanCellWidth
+            else:
+                point.side2 = "W"
+                point.lim4 = max(raster.raster.extent.YMin, raster.raster.extent.YMax - (currentrow + 1) * raster.raster.meanCellHeight) + 0.5 * raster.raster.meanCellHeight
+
+    ### Fin du traitement pour la configuration des fenêtres de sortie ###
+
 
     # Création des shapefiles inbci et outbci, avec les champs nécessaires
     arcpy.CreateFeatureclass_management(os.path.dirname(save_inbci),
@@ -232,15 +369,20 @@ def execute_DefBCI(r_flowdir, r_flowacc, distoutput, percent, str_zonesfolder,
                                         os.path.basename(save_outbci), "POINT", spatial_reference=flowdir.raster.spatialReference)
     arcpy.AddField_management(save_outbci, "zoneid", "LONG")
     arcpy.AddField_management(save_outbci, "side", "TEXT", field_length=1)
+    arcpy.AddField_management(save_outbci, "lim1", "LONG")
+    arcpy.AddField_management(save_outbci, "lim2", "LONG")
+    arcpy.AddField_management(save_outbci, "side2", "TEXT", field_length=1, )
+    arcpy.AddField_management(save_outbci, "lim3", "LONG")
+    arcpy.AddField_management(save_outbci, "lim4", "LONG")
 
 
     # Enregistrement dans les shapefiles des informations contenues dans les listes
     pointcursor = arcpy.da.InsertCursor(save_inbci, ["zoneid", "flowacc", "type", "fpid", "SHAPE@XY"])
     for point in listinputpoints:
         pointcursor.insertRow([point.numzone, point.flowacc, point.type, point.frompointid, (point.X, point.Y)])
-    pointcursor = arcpy.da.InsertCursor(save_outbci, ["zoneid", "side", "SHAPE@XY"])
+    pointcursor = arcpy.da.InsertCursor(save_outbci, ["zoneid", "side", "lim1", "lim2", "side2", "lim3", "lim4", "SHAPE@XY"])
     for point in listoutputpoints:
-        pointcursor.insertRow([point.numzone, point.side, (point.X, point.Y)])
+        pointcursor.insertRow([point.numzone, point.side, point.lim1, point.lim2, point.side2, point.lim3, point.lim4,(point.X, point.Y)])
 
     del pointcursor
 
@@ -287,7 +429,16 @@ def execute_DefBCI(r_flowdir, r_flowacc, distoutput, percent, str_zonesfolder,
                         latnum) + "\n")
                 filebci.close()
 
-
+    # Ajout de la zone de sortie au .bci
+    bcipointcursor = arcpy.da.SearchCursor(save_outbci,
+                                           ["zoneid", "side", "lim1", "lim2", "side2", "lim3", "lim4", "SHAPE@"])
+    for point in bcipointcursor:
+        newfile = str_outputfolder + "\\zone" + str(point[0]) + ".bci"
+        filebci = open(newfile, 'a')
+        filebci.write(point[1] + "\t" + str(point[2]) + "\t" + str(point[3]) + "\tHVAR\thvar")
+        if str(point[4]) != "0":
+            filebci.write("\n" + str(point[4]) + "\t" + str(point[5]) + "\t" + str(point[6]) + "\tHVAR\thvar")
+        filebci.close()
 
     # Création des fichiers .par et conversion des rasters en fichiers ASCII (un par point source comme il n'y a qu'un seul point d'entrée par simulation)
 
