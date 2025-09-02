@@ -1,14 +1,14 @@
 # coding: latin-1
 
 #####################################################
-# Guénolé Choné
+# GuÃ©nolÃ© ChonÃ©
 # Concordia University
 # Geography, Planning and Environment Department
 # guenole.chone@concordia.ca
 #####################################################
 
 # Versions
-# v1.0 - May 2020 - Création.
+# v1.0 - May 2020 - CrÃ©ation.
 
 import arcpy
 from SpatializeQ_rasters import *
@@ -16,8 +16,10 @@ from SpatializeQ_rasters import *
 
 class SpatializeQ_rasters(object):
     def __init__(self):
-        self.label = "Discharge spatialization along flow paths"
-        self.description = ""
+
+        self.label = "D8 discharge spatialization"
+        self.description = "Simple spatialization of discharges from points to raster using flow direction and flow accumulation rasters."
+
         self.canRunInBackground = True
 
     def getParameterInfo(self):
@@ -29,7 +31,7 @@ class SpatializeQ_rasters(object):
             parameterType="Required",
             direction="Input")
         param_frompoint = arcpy.Parameter(
-            displayName="Points de départ",
+            displayName="Points de dÃ©part",
             name="frompoint",
             datatype="GPFeatureLayer",
             parameterType="Required",
@@ -41,19 +43,19 @@ class SpatializeQ_rasters(object):
             parameterType="Required",
             direction="Input")
         param_q = arcpy.Parameter(
-            displayName="Débits ponctuels",
+            displayName="DÃ©bits ponctuels",
             name="q",
             datatype="GPRasterLayer",
             parameterType="Required",
             direction="Input")
         param_interpolation = arcpy.Parameter(
-            displayName="Interpolation entre les points de débits?",
+            displayName="Interpolation entre les points de dÃ©bits?",
             name="interpolation",
             datatype="GPBoolean",
             parameterType="Required",
             direction="Input")
         param_res = arcpy.Parameter(
-            displayName="Output: lignes de débits (raster)",
+            displayName="Output: lignes de dÃ©bits (raster)",
             name="spatialq",
             datatype="DERasterDataset",
             parameterType="Required",
@@ -81,7 +83,7 @@ class SpatializeQ_rasters(object):
         return
 
     def execute(self, parameters, messages):
-        # Récupération des paramètres
+        # RÃ©cupÃ©ration des paramÃ¨tres
         r_flowdir = arcpy.Raster(parameters[0].valueAsText)
         str_frompoint = parameters[1].valueAsText
         r_flowacc = arcpy.Raster(parameters[2].valueAsText)
