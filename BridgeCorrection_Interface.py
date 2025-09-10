@@ -13,6 +13,7 @@
 # v1.2 - Mai 2020 - Externalisation du code metier
 
 import arcpy
+import os
 from BridgeCorrection import *
 
 class BridgeCorrection(object):
@@ -27,23 +28,28 @@ class BridgeCorrection(object):
         param_raster = arcpy.Parameter(
             displayName="DEM",
             name="raster",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_bridges = arcpy.Parameter(
             displayName="Bridges to be corrected",
             name="bridges",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_res = arcpy.Parameter(
-            displayName="Result - Corrected DEM",
+            displayName="Output: Corrected DEM",
             name="result",
             datatype="DERasterDataset",
             parameterType="Required",
             direction="Output")
 
+        project_path = arcpy.env.workspace
+
+        param_raster.value = os.path.join(project_path, "WaterSurface.gdb", "lidar3m_min")
         param_bridges.filter.list = ["Polygon"]
+        param_bridges.value = os.path.join(project_path, "Geometry.gdb", "bridges")
+        param_res.value = os.path.join(project_path, "WaterSurface.gdb", "lidar3m_forws")
 
         params = [param_raster, param_bridges, param_res]
 

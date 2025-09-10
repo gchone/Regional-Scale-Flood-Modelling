@@ -33,13 +33,13 @@ class CreateTreeFromShapefile(object):
             parameterType="Required",
             direction="Input")
         param_route_shapefile = arcpy.Parameter(
-            displayName="Output network layer",
+            displayName="Output: Network layer",
             name="route_shapefile",
             datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_routelinks_table = arcpy.Parameter(
-            displayName="Output link table (DownRouteID-UpRouteID)",
+            displayName="Output: Link table (DownRouteID-UpRouteID)",
             name="routelinks_table",
             datatype="GPTableView",
             parameterType="Required",
@@ -63,8 +63,7 @@ class CreateTreeFromShapefile(object):
             parameterType="Optional",
             direction="Input")
 
-        current_project = arcpy.mp.ArcGISProject("CURRENT")
-        project_path =  os.path.dirname(current_project.filePath)
+        project_path = arcpy.env.workspace
 
         param_config.filter.type = "ValueList"
         param_config.filter.list = ["Main channel only", "With secondary channels"]

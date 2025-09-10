@@ -6,6 +6,7 @@
 #####################################################
 
 from FlowDirForWS import *
+import os
 
 class FlowDirForWS(object):
     def __init__(self):
@@ -18,19 +19,19 @@ class FlowDirForWS(object):
         param_routes = arcpy.Parameter(
             displayName="Input main route feature class (lines)",
             name="routes",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_DEM_3m = arcpy.Parameter(
             displayName="DEM for water surface assessment",
             name="DEM_3m",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_DEMs_footprints = arcpy.Parameter(
             displayName="DEMs footprint feature class",
             name="DEMs_footprints",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_output_workspace = arcpy.Parameter(
@@ -40,6 +41,12 @@ class FlowDirForWS(object):
             parameterType="Required",
             direction="Input")
 
+        project_path = arcpy.env.workspace
+        param_routes.filter.list = ["Polyline"]
+        param_routes.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
+        param_DEM_3m.value = os.path.join(project_path, "WaterSurface.gdb", "lidar3m_forws_lakes")
+        param_DEMs_footprints.value = os.path.join(project_path, "WaterSurface.gdb", "DEM_footprints")
+        param_output_workspace.value = os.path.join(project_path, "WaterSurface.gdb")
 
         params = [param_routes, param_DEM_3m, param_DEMs_footprints, param_output_workspace]
 

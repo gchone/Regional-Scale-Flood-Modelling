@@ -5,8 +5,9 @@
 # Date: 11 June 2021
 # Description: Create From Points and Splits
 #####################################################
-import arcpy
 
+import arcpy
+import os
 from tree.TreeTools import *
 
 
@@ -20,7 +21,7 @@ class CreateFromPointsAndSplits(object):
         param_network_shp = arcpy.Parameter(
             displayName="Network feature class",
             name="network_shp",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_links_table = arcpy.Parameter(
@@ -36,20 +37,27 @@ class CreateFromPointsAndSplits(object):
             parameterType="Required",
             direction="Input")
         param_points = arcpy.Parameter(
-            displayName="From points output feature class",
+            displayName="Output: From points feature class",
             name="points",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_splits = arcpy.Parameter(
-            displayName="Split points output feature class",
+            displayName="Output: Split points feature class",
             name="splits",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
-        param_RID_field.parameterDependencies = [param_network_shp.name]
+        project_path = arcpy.env.workspace
 
+        param_network_shp.filter.list = ["Polyline"]
+        param_network_shp.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
+        param_links_table.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
+        param_RID_field.parameterDependencies = [param_network_shp.name]
+        param_RID_field.value = "RID"
+        param_points.value = os.path.join(project_path, "Geometry.gdb", "from_pts")
+        param_splits.value = os.path.join(project_path, "Geometry.gdb", "splits")
 
         params = [param_network_shp, param_links_table, param_RID_field, param_points, param_splits]
 

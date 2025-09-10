@@ -8,6 +8,7 @@
 #####################################################
 from tree.TreeTools import *
 
+
 class TreeFromFlowDir(object):
     def __init__(self):
         self.label = "Create network from flow direction raster"
@@ -19,23 +20,23 @@ class TreeFromFlowDir(object):
         param_r_flowdir = arcpy.Parameter(
             displayName="Flow direction raster",
             name="r_flowdir",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_str_frompoints = arcpy.Parameter(
             displayName="Upstream ends of the network (points layer)",
             name="str_frompoints",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_route_shapefile = arcpy.Parameter(
-            displayName="Output network layer",
+            displayName="Output: Network layer",
             name="route_shapefile",
             datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_routelinks_table = arcpy.Parameter(
-            displayName="Output link table (reach-RouteID)",
+            displayName="Output: Link table",
             name="routelinks_table",
             datatype="GPTableView",
             parameterType="Required",
@@ -47,7 +48,7 @@ class TreeFromFlowDir(object):
             parameterType="Required",
             direction="Input")
         param_str_output_points = arcpy.Parameter(
-            displayName="Flow direction pixels along flow path output table",
+            displayName="Output: Flow direction pixels along flow path output table",
             name="str_output_points",
             datatype="GPTableView",
             parameterType="Required",
@@ -55,7 +56,7 @@ class TreeFromFlowDir(object):
         param_split_pts = arcpy.Parameter(
             displayName="Split points between reaches (feature class)",
             name="split_pts",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Optional",
             direction="Input")
         param_tolerance = arcpy.Parameter(
@@ -65,8 +66,15 @@ class TreeFromFlowDir(object):
             parameterType="Optional",
             direction="Input")
 
+        project_path = arcpy.env.workspace
 
+        param_r_flowdir.value = os.path.join(project_path, "WaterSurface.gdb", "lidar3m_fd")
+        param_str_frompoints.value = os.path.join(project_path, "Geometry.gdb", "from_pts")
+        param_route_shapefile.value = os.path.join(project_path, "WaterSurface.gdb", "wsroutesD8")
+        param_routelinks_table.value = os.path.join(project_path, "WaterSurface.gdb", "wslinksD8")
         param_routeID_field.value = "RID"
+        param_str_output_points.value = os.path.join(project_path, "WaterSurface.gdb", "ws_pathpointsD8")
+
         params = [param_r_flowdir, param_str_frompoints, param_route_shapefile, param_routelinks_table, param_routeID_field, param_str_output_points, param_split_pts, param_tolerance]
 
         return params

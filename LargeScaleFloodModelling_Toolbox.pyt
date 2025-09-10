@@ -1,0 +1,20 @@
+# -*- coding: utf-8 -*-
+
+import arcpy
+
+from WatershedScaleDEMprocessing_Interface import *
+from DEMprocessing_Interface import *
+from BridgeCorrection_Interface import *
+from FlowDirForWS_Interface import *
+from CreateFromPointsAndSplits_Interface import *
+from TreeFromFlowDir_Interface import *
+from PlacePointsAlongReaches_Interface import *
+from ExtractWaterSurface_Interface import *
+
+class Toolbox(object):
+    def __init__(self):
+
+        self.label = "Large Scale Flood Modeling Toolbox"
+        self.alias = ""
+
+        self.tools = [WatershedScaleDEMprocessing, BatchAggregate, BridgeCorrection, FlowDirForWS, CreateFromPointsAndSplits, TreeFromFlowDir, PlacePointsAlongReaches, ExtractWaterSurface]

@@ -7,7 +7,7 @@
 # Description: Place points along reaches based on a fixed interval
 #####################################################
 import arcpy
-
+import os
 from tree.TreeTools import *
 
 
@@ -21,7 +21,7 @@ class PlacePointsAlongReaches(object):
         param_network_shp = arcpy.Parameter(
             displayName="Route feature class",
             name="network_shp",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_links_table = arcpy.Parameter(
@@ -43,13 +43,21 @@ class PlacePointsAlongReaches(object):
             parameterType="Required",
             direction="Input")
         param_output_pt = arcpy.Parameter(
-            displayName="Output point table",
+            displayName="Output: Point table",
             name="output_pt",
             datatype="GPTableView",
             parameterType="Required",
             direction="Output")
 
+        project_path = arcpy.env.workspace
+
+        param_network_shp.filter.list = ["Polyline"]
+        param_network_shp.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
+        param_links_table.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
         param_RID_field.parameterDependencies = [param_network_shp.name]
+        param_RID_field.value = "RID"
+        param_interval.value = 5.0
+        param_output_pt.value = os.path.join(project_path, "Geometry.gdb", "target_pts_raw")
 
         params = [param_network_shp, param_links_table, param_RID_field, param_interval, param_output_pt]
 

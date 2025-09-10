@@ -8,6 +8,7 @@
 #####################################################
 
 from LargeScaleFloodMetaTools import *
+import os
 
 class FlowDirNetwork(object):
     def __init__(self):
@@ -19,7 +20,7 @@ class FlowDirNetwork(object):
         param_routes = arcpy.Parameter(
             displayName="Input route feature class (lines)",
             name="routes",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_links = arcpy.Parameter(
@@ -37,37 +38,47 @@ class FlowDirNetwork(object):
         param_r_flow_dir= arcpy.Parameter(
             displayName="Flow Direction raster",
             name="r_flow_dir",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_routeD8 = arcpy.Parameter(
-            displayName="Output route D8 feature class (lines)",
+            displayName="Output: Route D8 feature class (lines)",
             name="routeD8",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_linksD8 = arcpy.Parameter(
-            displayName="Link table",
+            displayName="Output: Link table",
             name="linksD8",
             datatype="GPTableView",
             parameterType="Required",
             direction="Output")
         param_ptsonD8 = arcpy.Parameter(
-            displayName="Point on route D8 feature class (lines)",
+            displayName="Output: Point on route D8 feature class (lines)",
             name="ptsonD8",
             datatype="GPTableView",
             parameterType="Required",
             direction="Output")
         param_relatetable = arcpy.Parameter(
-            displayName="Relate table",
+            displayName="Output: Relate table",
             name="relatetable",
             datatype="GPTableView",
             parameterType="Required",
             direction="Output")
 
+        project_path = arcpy.env.workspace
 
+
+        param_routes.filter.list = ["Polyline"]
+        param_routes.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
+        param_links.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
         param_RID_field.parameterDependencies = [param_routes.name]
-
+        param_RID_field.value = "RID"
+        param_r_flow_dir.value = os.path.join(project_path, "10mDEMs.gdb", "lidar10m_fd")
+        param_routeD8.value = os.path.join(project_path, "Geometry.gdb", "routesD8")
+        param_linksD8.value = os.path.join(project_path, "Geometry.gdb", "links")
+        param_ptsonD8.value = os.path.join(project_path, "Geometry.gdb", "pathpointsD8")
+        param_relatetable.value = os.path.join(project_path, "Geometry.gdb", "fd_net_relatetable")
 
         params = [param_routes, param_links, param_RID_field, param_r_flow_dir, param_routeD8, param_linksD8, param_ptsonD8, param_relatetable]
 

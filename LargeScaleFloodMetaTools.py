@@ -9,8 +9,63 @@ from AssignPointToClosestPointOnRoute import *
 from InterpolatePoints import *
 from WSsmoothing import *
 import ArcpyGarbageCollector as gc
+from tree.TreeTools import *
 from numpy.lib import recfunctions as rfn
 import csv
+
+def execute_WatershedScaleDEMprocessing(DEM, streams_toburn, streamspoly_toburn, rivernet, rivernet_main, toburn_frompoly, toburn_fromlines,
+                                        s_burned, s_fill, s_flow_dir, s_flow_acc, routes, routes_links, routes_main, routes_main_links,
+                                        routeD8, linksD8, pathpointsD8, fd_net_relatetable, RID_field, DownEnd_field, Main_field,
+                                        Qorder_field, messages):
+    ### Creates:
+    # - Mask.gdb\frompoly
+    # - 10mDEMs.gdb\net_lines
+    # - 10mDEMs.gdb\lidar10m_burn
+    # - 10mDEMs.gdb\lidar10m_fill
+    # - 10mDEMs.gdb\lidar10m_fd
+    # - 10mDEMs.gdb\lidar10m_facc
+    # - Geometry.gdb\routes_main
+    # - Geometry.gdb\routes_main_links
+    # - Geometry.gdb\routes
+    # - Geometry.gdb\routes_links
+    # - Geometry.gdb\routesD8
+    # - Geometry.gdb\linksD8
+    # - Geometry.gdb\pathpointsD8
+    # - Geometry.gdb\fd_net_relatetable
+
+    arcpy.env.cellSize = DEM.catalogPath
+    arcpy.env.snapRaster = DEM.catalogPath
+    arcpy.env.extent = DEM.catalogPath
+    arcpy.env.outputCoordinateSystem = DEM.catalogPath
+
+    messages.addMessage("Stream-burning DEM..")
+
+    arcpy.conversion.PolygonToRaster(streamspoly_toburn, arcpy.Describe(streamspoly_toburn).OIDFieldName, toburn_frompoly, cellsize = DEM)
+    arcpy.conversion.PolylineToRaster(streams_toburn, arcpy.Describe(streams_toburn).OIDFieldName, toburn_fromlines, cellsize = DEM)
+
+    burned_frompoly = arcpy.sa.Con( arcpy.sa.IsNull(toburn_frompoly), DEM, DEM-100)
+    burned = arcpy.sa.Con( arcpy.sa.IsNull(toburn_fromlines), burned_frompoly, DEM-200)
+    burned.save(s_burned)
+
+    messages.addMessage("Hydraulic processing of DEM...")
+
+    fill = arcpy.sa.Fill(burned)
+    fill.save(s_fill)
+    flow_dir = arcpy.sa.FlowDirection(fill)
+    flow_dir.save(s_flow_dir)
+    flow_acc = arcpy.sa.FlowAccumulation(flow_dir)
+    flow_acc.save(s_flow_acc)
+
+    messages.addMessage("Identifying river networks...")
+    execute_CreateTreeFromShapefile(rivernet, routes, routes_links, RID_field, DownEnd_field,
+                                    messages, Main_field)
+    execute_CreateTreeFromShapefile(rivernet_main, routes_main, routes_main_links, RID_field, DownEnd_field,
+                                    messages, None)
+
+    execute_FlowDirNetwork(routes_main, routes_main_links, RID_field, flow_dir, routeD8, linksD8, pathpointsD8, fd_net_relatetable, messages)
+
+    execute_OrderReaches(routes_main, routes_main_links, RID_field, flow_acc, routeD8, linksD8, pathpointsD8, fd_net_relatetable, Qorder_field, messages)
+
 
 def execute_FlowDirNetwork(routes, links, RID_field, r_flow_dir, routeD8, linksD8, ptsonD8, relatetable, messages):
     fp = gc.CreateScratchName("fp", data_type="FeatureClass", workspace="in_memory")

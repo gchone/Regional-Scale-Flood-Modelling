@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-
+import os
 from tree.TreeTools import *
 
 class TopologicalRelateNetworks(object):
@@ -14,7 +14,7 @@ class TopologicalRelateNetworks(object):
         param_shapefile_A = arcpy.Parameter(
             displayName="D8 network layer",
             name="shapefile_A",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_RID_A = arcpy.Parameter(
@@ -32,7 +32,7 @@ class TopologicalRelateNetworks(object):
         param_shapefile_B = arcpy.Parameter(
             displayName="Reference network layer",
             name="shapefile_B",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_RID_B = arcpy.Parameter(
@@ -50,7 +50,7 @@ class TopologicalRelateNetworks(object):
         param_fpoints = arcpy.Parameter(
             displayName="From Points",
             name="fpoints",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_out_table = arcpy.Parameter(
@@ -60,8 +60,17 @@ class TopologicalRelateNetworks(object):
             parameterType="Required",
             direction="Output")
 
+        project_path = arcpy.env.workspace
+        param_shapefile_A.value = os.path.join(project_path, "WaterSurface.gdb", "wsroutesD8")
         param_RID_A.parameterDependencies = [param_shapefile_A.name]
+        param_RID_A.value = "RID"
+        param_links_A.value = os.path.join(project_path, "WaterSurface.gdb", "wslinksD8")
+        param_shapefile_B.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
         param_RID_B.parameterDependencies = [param_shapefile_B.name]
+        param_RID_B.value = "RID"
+        param_links_B.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
+        param_fpoints.value = os.path.join(project_path, "Geometry.gdb", "from_pts")
+        param_out_table.value = os.path.join(project_path, "WaterSurface.gdb", "net_relate_table")
 
         params = [param_shapefile_A, param_RID_A, param_links_A, param_shapefile_B, param_RID_B, param_links_B, param_fpoints, param_out_table]
 
