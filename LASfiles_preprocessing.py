@@ -251,7 +251,7 @@ def execute_mergelas(input_folder, output_folder):
         # Run PDAL pipeline
         subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
 
-def execute_lastoraster(input_folder, output_folder, cellsize):
+def execute_lastoraster(input_folder, output_folder, footprint_folder, cellsize):
     # Convert LAS files into DEMs by creating a TIN from the LAS points and then interpolating the TIN to create a raster.
     # To be used after execute_mergelas
     las_files = [f for f in os.listdir(input_folder) if f.endswith(".las")]
@@ -285,6 +285,10 @@ def execute_lastoraster(input_folder, output_folder, cellsize):
                 {
                     "type": "readers.las",
                     "filename": full_path_input_file
+                },
+                {
+                    "type": "filters.crop",
+                    "shape": os.path.join(footprint_folder, "footprint_"+file[:-4] +".shp")
                 },
                 {
                     "type": "filters.delaunay"  # Create a TIN from the LAS points
