@@ -36,7 +36,7 @@ def execute_DefBCI(r_flowdir, r_flowacc, percent, str_zonesfolder,
         flowdir.checkMatch(flowacc)
         flowdir.checkMatch(dem)
     except Exception as e:
-        messages.addErrorMessage(e.message)
+        messages.addErrorMessage(repr(e))
 
     # Création d'un nouveau fichier de zones en prenant les enveloppes
     zones = str_zonesfolder + "\\envelopezones.shp"

@@ -44,12 +44,6 @@ class DefBciWithLateralWlakes_hdown(object):
             datatype="GPRasterLayer",
             parameterType="Required",
             direction="Input")
-        param_dist = arcpy.Parameter(
-            displayName="Downstream boundary condition width (m)",
-            name="distance",
-            datatype="GPLong",
-            parameterType="Required",
-            direction="Input")
         param_percent = arcpy.Parameter(
             displayName="Drainage area variation for discharge correction (%)",
             name="percentdischarge",
@@ -106,10 +100,9 @@ class DefBciWithLateralWlakes_hdown(object):
             parameterType="Required",
             direction="Input")
 
-        param_dist.value = 4000
         param_percent.value = 1
 
-        params = [param_flowdir, param_flowacc, param_dist, param_percent, param_zones, param_dem, param_width, param_zbed, param_manning, param_mask, param_output, param0]
+        params = [param_flowdir, param_flowacc, param_percent, param_zones, param_dem, param_width, param_zbed, param_manning, param_mask, param_output, param0]
 
         return params
 
@@ -131,21 +124,20 @@ class DefBciWithLateralWlakes_hdown(object):
         # Récupération des paramètres
         str_flowdir = parameters[0].valueAsText
         str_flowacc = parameters[1].valueAsText
-        distoutput = int(parameters[2].valueAsText)
-        percent = float(parameters[3].valueAsText)
-        str_zonesfolder = parameters[4].valueAsText
+        percent = float(parameters[2].valueAsText)
+        str_zonesfolder = parameters[3].valueAsText
 
-        str_dem = parameters[5].valueAsText
-        str_width = parameters[6].valueAsText
-        str_zbed = parameters[7].valueAsText
-        str_manning = parameters[8].valueAsText
-        str_mask = parameters[9].valueAsText
+        str_dem = parameters[4].valueAsText
+        str_width = parameters[5].valueAsText
+        str_zbed = parameters[6].valueAsText
+        str_manning = parameters[7].valueAsText
+        str_mask = parameters[8].valueAsText
 
-        str_outputfolder = parameters[10].valueAsText
+        str_outputfolder = parameters[9].valueAsText
 
-        arcpy.env.scratchWorkspace = parameters[11].valueAsText
+        arcpy.env.scratchWorkspace = parameters[10].valueAsText
 
-        execute_DefBCI(arcpy.Raster(str_flowdir), arcpy.Raster(str_flowacc), distoutput, percent, str_zonesfolder,
+        execute_DefBCI(arcpy.Raster(str_flowdir), arcpy.Raster(str_flowacc), percent, str_zonesfolder,
                        arcpy.Raster(str_dem), arcpy.Raster(str_width), arcpy.Raster(str_zbed), arcpy.Raster(str_manning),
                        arcpy.Raster(str_mask), str_outputfolder, messages)
 

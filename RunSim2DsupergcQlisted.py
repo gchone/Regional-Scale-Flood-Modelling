@@ -109,7 +109,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
         Q_iteration +=1
         simname = fieldQ
         currentsimfolder = str_simfolder + "\\" + simname
-        currentresult = str_simfolder + "\\res_" + simname
+        currentresult = str_simfolder + "\\res_" + simname + ".tif"
 
         skipsim = False # Used when a simulation produced no output
 
@@ -123,15 +123,14 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
             for point in sorted(segment, key=lambda q: q[2]):
 
                 if point[3]=="main" and not skipsim: # Main inbci point = a simulation needs to be run
-                    #try:
-                    if True:
-                        if not arcpy.Exists(currentsimfolder + "\\elev_zone" + str(point[1])):
+                    try:
+                        if not arcpy.Exists(currentsimfolder + "\\elev_zone" + str(point[1]) + ".tif"):
 
                             print("Running simulation on zone " + str(point[1]))
                             distoutput = dict_outputwindow[point[1]]
 
                             # ref_raster is the dem of the current zone, used for cell size and extent
-                            ref_raster = RasterIO(arcpy.Raster(str_zonefolder + "\\zone" + str(point[1])))
+                            ref_raster = RasterIO(arcpy.Raster(str_zonefolder + "\\zone" + str(point[1]) + ".tif"))
 
                             # Looking for the downstream elevation, either from a lake or from the previous simulation result
                             lakebci = False
@@ -145,10 +144,10 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                     # issue with Mosaic_management, used later with lisflood_res:
                                     # crash sometimes if the file is read here
                                     # so we make a tmp copy
-                                    if arcpy.Exists(currentsimfolder + "\\tmp_zone"  + str(point[1])):
-                                        arcpy.Delete_management(currentsimfolder + "\\tmp_zone"  + str(point[1]))
-                                    arcpy.Copy_management(currentresult, currentsimfolder + "\\tmp_zone" + str(point[1]))
-                                    res_downstream = RasterIO(arcpy.Raster(currentsimfolder + "\\tmp_zone"  + str(point[1])))
+                                    if arcpy.Exists(currentsimfolder + "\\tmp_zone"  + str(point[1]) + ".tif"):
+                                        arcpy.Delete_management(currentsimfolder + "\\tmp_zone"  + str(point[1]) + ".tif")
+                                    arcpy.Copy_management(currentresult, currentsimfolder + "\\tmp_zone" + str(point[1]) + ".tif")
+                                    res_downstream = RasterIO(arcpy.Raster(currentsimfolder + "\\tmp_zone"  + str(point[1]) + ".tif"))
                                     lakebci = False
 
                             # The .bci file, from the template, will be copied and modified
@@ -574,8 +573,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 round(lastdischarge / 200., - int(math.floor(math.log10(abs(lastdischarge / 200.))))))
 
                             # Running LISFLOOD-FP
-                            if point[1]==71:
-                                subprocess.check_call([str_lisfloodfolder + "\\lisflood.exe", "-steady", "-steadytol", steadytol, str_simfolder + "\\zone" + str(point[1]) + ".par"], shell=True, cwd=str_simfolder)
+                            subprocess.check_call([str_lisfloodfolder + "\\lisflood.exe", "-steady", "-steadytol", steadytol, str_simfolder + "\\zone" + str(point[1]) + ".par"], shell=True, cwd=str_simfolder)
                             progres += 1
                             arcpy.SetProgressorPosition(progres)
 
@@ -584,46 +582,47 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
 
                             # Converting output files
                             zonename = "zone"+str(point[1])
-                            # if os.path.exists(currentsimfolder + "\\"  + zonename + "elev.txt"):
-                            #     os.remove(currentsimfolder + "\\"   + zonename + "elev.txt")
-                            #
-                            # if os.path.exists(currentsimfolder   + "\\" + zonename + "-9999.elev"):
-                            #     os.rename(currentsimfolder  + "\\"  + zonename + "-9999.elev",
-                            #               currentsimfolder + "\\" + zonename + "elev.txt")
-                            # else:
-                            #     os.rename(currentsimfolder  + "\\" + zonename + "-0001.elev",
-                            #               currentsimfolder + "\\" + zonename + "elev.txt")
-                            #     filelog.write("Steady state not reached : " + zonename + ", sim " + simname+ "\n")
-                            #     messages.addWarningMessage("Steady state not reached : " + zonename + ", sim " + simname)
-                            #
-                            # if os.path.exists(currentsimfolder + "\\" + zonename + "-9999.Vx") or os.path.exists(currentsimfolder + "\\"  + zonename + "-0001.Vx"):
-                            #     if os.path.exists(currentsimfolder + "\\" + zonename + "Vx.txt"):
-                            #         os.remove(currentsimfolder + "\\" + zonename + "Vx.txt")
-                            #
-                            #     if os.path.exists(currentsimfolder + "\\" + zonename + "Vy.txt"):
-                            #         os.remove(currentsimfolder + "\\" + zonename + "Vy.txt")
-                            #     if os.path.exists(currentsimfolder  + "\\" + zonename + "-9999.Vx"):
-                            #         os.rename(currentsimfolder  + "\\" + zonename + "-9999.Vx",
-                            #                   currentsimfolder+ "\\" + zonename + "Vx.txt")
-                            #         os.rename(currentsimfolder  + "\\"  + zonename + "-9999.Vy",
-                            #                   currentsimfolder  + "\\" + zonename + "Vy.txt")
-                            #     else:
-                            #         os.rename(currentsimfolder  + "\\" + zonename + "-0001.Vx",
-                            #                   currentsimfolder  + "\\" + zonename + "Vx.txt")
-                            #         os.rename(currentsimfolder  + "\\" + zonename + "-0001.Vy",
-                            #                   currentsimfolder  + "\\" + zonename + "Vy.txt")
-                            #     arcpy.ASCIIToRaster_conversion(currentsimfolder  + "\\" + zonename + "Vx.txt",
-                            #                                    currentsimfolder + "\\Vx_" + zonename,
-                            #                                "FLOAT")
-                            #     arcpy.ASCIIToRaster_conversion(currentsimfolder  + "\\" + zonename + "Vy.txt",
-                            #                                    currentsimfolder + "\\Vy_" + zonename,
-                            #                                "FLOAT")
-                            #     arcpy.DefineProjection_management(currentsimfolder + "\\Vx_" + zonename, ref_raster.raster.spatialReference)
-                            #     arcpy.DefineProjection_management(currentsimfolder + "\\Vy_" + zonename, ref_raster.raster.spatialReference)
-                            #
+
+                            if os.path.exists(currentsimfolder + "\\"  + zonename + "elev.txt"):
+                                os.remove(currentsimfolder + "\\"   + zonename + "elev.txt")
+
+                            if os.path.exists(currentsimfolder   + "\\" + zonename + "-9999.elev"):
+                                os.rename(currentsimfolder  + "\\"  + zonename + "-9999.elev",
+                                          currentsimfolder + "\\" + zonename + "elev.txt")
+                            else:
+                                os.rename(currentsimfolder  + "\\" + zonename + "-0001.elev",
+                                          currentsimfolder + "\\" + zonename + "elev.txt")
+                                filelog.write("Steady state not reached : " + zonename + ", sim " + simname+ "\n")
+                                messages.addWarningMessage("Steady state not reached : " + zonename + ", sim " + simname)
+
+                            if os.path.exists(currentsimfolder + "\\" + zonename + "-9999.Vx") or os.path.exists(currentsimfolder + "\\"  + zonename + "-0001.Vx"):
+                                if os.path.exists(currentsimfolder + "\\" + zonename + "Vx.txt"):
+                                    os.remove(currentsimfolder + "\\" + zonename + "Vx.txt")
+
+                                if os.path.exists(currentsimfolder + "\\" + zonename + "Vy.txt"):
+                                    os.remove(currentsimfolder + "\\" + zonename + "Vy.txt")
+                                if os.path.exists(currentsimfolder  + "\\" + zonename + "-9999.Vx"):
+                                    os.rename(currentsimfolder  + "\\" + zonename + "-9999.Vx",
+                                              currentsimfolder+ "\\" + zonename + "Vx.txt")
+                                    os.rename(currentsimfolder  + "\\"  + zonename + "-9999.Vy",
+                                              currentsimfolder  + "\\" + zonename + "Vy.txt")
+                                else:
+                                    os.rename(currentsimfolder  + "\\" + zonename + "-0001.Vx",
+                                              currentsimfolder  + "\\" + zonename + "Vx.txt")
+                                    os.rename(currentsimfolder  + "\\" + zonename + "-0001.Vy",
+                                              currentsimfolder  + "\\" + zonename + "Vy.txt")
+                                arcpy.ASCIIToRaster_conversion(currentsimfolder  + "\\" + zonename + "Vx.txt",
+                                                               currentsimfolder + "\\Vx_" + zonename + ".tif",
+                                                           "FLOAT")
+                                arcpy.ASCIIToRaster_conversion(currentsimfolder  + "\\" + zonename + "Vy.txt",
+                                                               currentsimfolder + "\\Vy_" + zonename + ".tif",
+                                                           "FLOAT")
+                                arcpy.DefineProjection_management(currentsimfolder + "\\Vx_" + zonename + ".tif", ref_raster.raster.spatialReference)
+                                arcpy.DefineProjection_management(currentsimfolder + "\\Vy_" + zonename + ".tif", ref_raster.raster.spatialReference)
+
 
                             # Creating a raster for ArcGIS
-                            str_elev = currentsimfolder + "\\elev_" + zonename
+                            str_elev = currentsimfolder + "\\elev_" + zonename + ".tif"
                             arcpy.ASCIIToRaster_conversion(currentsimfolder + "\\"  + zonename + "elev.txt", str_elev, "FLOAT")
                             arcpy.DefineProjection_management(str_elev, ref_raster.raster.spatialReference)
 
@@ -631,10 +630,10 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
 
                         if not arcpy.Exists(currentresult):
 
-                            arcpy.Copy_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]), currentresult)
+                            arcpy.Copy_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult)
                         else:
 
-                            arcpy.Mosaic_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]), currentresult, mosaic_type="MAXIMUM")
+                            arcpy.Mosaic_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult, mosaic_type="MAXIMUM")
                             #arcpy.Copy_management(str_output + "\\lisflood_res", str_output + "\\tmp_mosaic")
                             #arcpy.Delete_management(str_output + "\\lisflood_res")
                             # arcpy.MosaicToNewRaster_management(';'.join([str_output + "\\tmp_mosaic", str_output + "\\elev_" + point[1]]),
@@ -642,10 +641,10 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             #                                    pixel_type="32_BIT_FLOAT",
                             #                                    number_of_bands=1)
 
-                    # except BaseException as e:
-                    #     filelog.write("ERREUR in " + simname + ": sim aborded during zone "+ str(point[1]) + ", " + simname + ":\n")
-                    #     filelog.write(str(e))
-                    #     messages.addWarningMessage("Some simulations skipped. See log file.")
-                    #     skipsim = True
+                    except BaseException as e:
+                        filelog.write("ERREUR in " + simname + ": sim aborded during zone "+ str(point[1]) + ", " + simname + ":\n")
+                        filelog.write(repr(e))
+                        messages.addWarningMessage("Some simulations skipped. See log file.")
+                        skipsim = True
     return
 
