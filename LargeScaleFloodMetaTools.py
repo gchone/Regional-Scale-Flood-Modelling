@@ -319,7 +319,7 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
     #     arcpy.Delete_management(output_points)
     # arcpy.da.NumPyArrayToTable(finalarray, output_points)
 
-def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints, id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints, RID_Qpoints, dist_field_Qpoints, Q_field, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef, output_points, messages):
+def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints, id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints, Q_field, points_tol, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef, output_points, messages):
     # Two cases :
     # - either Q_field is a field in the Q points with the discharges to spatialize (DEM_footprints and Qcsv_file must be None).
     #   This is used to spatialize flood discharges
@@ -344,6 +344,10 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
         D8pts_withDEM = gc.CreateScratchName("D8ptsDEM", data_type="FeatureClass", workspace="in_memory")
         arcpy.SpatialJoin_analysis(D8pts, DEM_footprints, D8pts_withDEM)
 
+    # Project points on the D8 network
+    Qpoints_locatetable = gc.CreateScratchName("points", data_type="ArcInfoTable", workspace="in_memory")
+    arcpy.LocateFeaturesAlongRoutes_lr(Qpoints, routes_D8, RID_field_D8, points_tol, Qpoints_locatetable,
+                                       RID_field_D8 + " POINT MEAS")
 
     network = RiverNetwork()
     network.dict_attr_fields['id'] = RID_field_D8
@@ -351,13 +355,13 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
 
     Qcollection = Points_collection(network, "Qpts")
     Qcollection.dict_attr_fields['id'] = id_field_Qpoints
-    Qcollection.dict_attr_fields['reach_id'] = RID_Qpoints
-    Qcollection.dict_attr_fields['dist'] = dist_field_Qpoints
+    Qcollection.dict_attr_fields['reach_id'] = RID_field_D8
+    Qcollection.dict_attr_fields['dist'] = "MEAS"
     Qcollection.dict_attr_fields['name'] = name_field_Qpoints
     Qcollection.dict_attr_fields['drainage_area'] = drainage_area_field_Qpoints
     if Q_field is not None:
         Qcollection.dict_attr_fields['discharge'] = Q_field
-    Qcollection.load_table(Qpoints)
+    Qcollection.load_table(Qpoints_locatetable)
 
     targetcollection = Points_collection(network, "target")
     targetcollection.dict_attr_fields['id'] = "id"
@@ -497,7 +501,12 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
 
             # Export the discharge corresponding to the local day (local DEM) (it needs to be an attribute)
             if hasattr(targetpt, "weightedQ"):
-                targetpt.computedQLiDAR = targetpt.weightedQ[targetpt.DEM]
+                try:
+                    targetpt.computedQLiDAR = targetpt.weightedQ[targetpt.DEM]
+                except KeyError as e:
+                    messages.addErrorMessage("Missing day of discharge in the csv file: " + str(targetpt.DEM) +
+                                             " (if -9999, make sure that all points on route D8 fall within a DEM footprint polygon)")
+                    raise e
             else:
                 targetpt.computedQLiDAR = -999
 
@@ -514,7 +523,12 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
         targetcollection.add_SavedVariable("computedQLiDAR", "float")
     else:
         targetcollection.add_SavedVariable("computedQLiDAR", "float", None, Q_field)
-    targetcollection.save_points(output_points)
+
+    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+    targetcollection.save_points(temp_outtable)
+    arcpy.MakeRouteEventLayer_lr(routes_D8, RID_field_D8, temp_outtable, RID_field_D8 + " POINT dist", "D8pts_lyr")
+    arcpy.CopyFeatures_management("D8pts_lyr", output_points)
+
 
 
 
