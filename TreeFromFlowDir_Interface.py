@@ -1,19 +1,11 @@
 # -*- coding: utf-8 -*-
 
-
-#####################################################
-# Guénolé Choné
-# Date: 11 June 2021
-# Description: Create Tree from Flow Direction raster
-#####################################################
 from tree.TreeTools import *
-
 
 class TreeFromFlowDir(object):
     def __init__(self):
         self.label = "Create network from flow direction raster"
-        self.description = "This tool creates a network data structure from a flow direction raster, defined by a " \
-                           "link  atablend a RouteID field."
+        self.description = "This tool creates a network data structure from a flow direction raster"
         self.canRunInBackground = True
 
     def getParameterInfo(self):
@@ -24,7 +16,7 @@ class TreeFromFlowDir(object):
             parameterType="Required",
             direction="Input")
         param_str_frompoints = arcpy.Parameter(
-            displayName="Upstream ends of the network (points layer)",
+            displayName="Upstream ends of the network",
             name="str_frompoints",
             datatype="DEFeatureClass",
             parameterType="Required",
@@ -50,11 +42,11 @@ class TreeFromFlowDir(object):
         param_str_output_points = arcpy.Parameter(
             displayName="Output: Flow direction pixels along flow path output table",
             name="str_output_points",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_split_pts = arcpy.Parameter(
-            displayName="Split points between reaches (feature class)",
+            displayName="Split points between reaches",
             name="split_pts",
             datatype="DEFeatureClass",
             parameterType="Optional",

@@ -18,7 +18,7 @@ class FlowDirNetwork(object):
 
     def getParameterInfo(self):
         param_routes = arcpy.Parameter(
-            displayName="Input route feature class (lines)",
+            displayName="Input route feature class",
             name="routes",
             datatype="DEFeatureClass",
             parameterType="Required",
@@ -42,7 +42,7 @@ class FlowDirNetwork(object):
             parameterType="Required",
             direction="Input")
         param_routeD8 = arcpy.Parameter(
-            displayName="Output: Route D8 feature class (lines)",
+            displayName="Output: Route D8 feature class",
             name="routeD8",
             datatype="DEFeatureClass",
             parameterType="Required",
@@ -54,9 +54,9 @@ class FlowDirNetwork(object):
             parameterType="Required",
             direction="Output")
         param_ptsonD8 = arcpy.Parameter(
-            displayName="Output: Point on route D8 feature class (lines)",
+            displayName="Output: Point on route D8 feature class",
             name="ptsonD8",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_relatetable = arcpy.Parameter(
