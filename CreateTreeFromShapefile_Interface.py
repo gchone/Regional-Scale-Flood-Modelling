@@ -95,8 +95,7 @@ class CreateTreeFromShapefile(object):
         return True
 
     def updateParameters(self, parameters):
-        current_project = arcpy.mp.ArcGISProject("CURRENT")
-        project_path = os.path.dirname(current_project.filePath)
+        project_path = arcpy.env.workspace
         if not parameters[0].hasBeenValidated:
             if parameters[0].valueAsText == "Main channel only":
                 parameters[1].value = os.path.join(project_path, "Geometry.gdb", "linear_main_d")
