@@ -18,7 +18,7 @@ class WatershedScaleDEMprocessing(object):
             parameterType="Required",
             direction="Input")
         param_lines_toburn = arcpy.Parameter(
-            displayName="River network for stream burning (lines)",
+            displayName="River network for stream burning",
             name="lines_toburn",
             datatype="DEFeatureClass",
             parameterType="Required",
@@ -30,13 +30,13 @@ class WatershedScaleDEMprocessing(object):
             parameterType="Required",
             direction="Input")
         param_riverlines = arcpy.Parameter(
-            displayName="River network (lines)",
+            displayName="River network",
             name="riverlines",
             datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_riverlinesmain = arcpy.Parameter(
-            displayName="River network - main channels only (lines)",
+            displayName="River network - main channels only",
             name="riverlinesmain",
             datatype="DEFeatureClass",
             parameterType="Required",
@@ -103,7 +103,7 @@ class WatershedScaleDEMprocessing(object):
             parameterType="Required",
             direction="Output")
         param_routeD8 = arcpy.Parameter(
-            displayName="Output: Route D8 feature class (lines)",
+            displayName="Output: Route D8 feature class",
             name="routeD8",
             datatype="DEFeatureClass",
             parameterType="Required",
@@ -115,9 +115,9 @@ class WatershedScaleDEMprocessing(object):
             parameterType="Required",
             direction="Output")
         param_ptsonD8 = arcpy.Parameter(
-            displayName="Output: Point on route D8 feature class (lines)",
+            displayName="Output: Point on route D8 feature class",
             name="ptsonD8",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
         param_relatetable = arcpy.Parameter(
@@ -152,7 +152,7 @@ class WatershedScaleDEMprocessing(object):
         param_routes_main.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
         param_main_links.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
         param_routeD8.value = os.path.join(project_path, "Geometry.gdb", "routesD8")
-        param_linksD8.value = os.path.join(project_path, "Geometry.gdb", "links")
+        param_linksD8.value = os.path.join(project_path, "Geometry.gdb", "linksD8")
         param_ptsonD8.value = os.path.join(project_path, "Geometry.gdb", "pathpointsD8")
         param_relatetable.value = os.path.join(project_path, "Geometry.gdb", "fd_net_relatetable")
 
