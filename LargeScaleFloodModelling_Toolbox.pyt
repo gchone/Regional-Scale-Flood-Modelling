@@ -10,6 +10,7 @@ from CreateFromPointsAndSplits_Interface import *
 from TreeFromFlowDir_Interface import *
 from PlacePointsAlongReaches_Interface import *
 from ExtractWaterSurface_Interface import *
+from SpatializeQLiDAR_from_gauging_stations_Interface import *
 
 class Toolbox(object):
     def __init__(self):
@@ -17,4 +18,6 @@ class Toolbox(object):
         self.label = "Large Scale Flood Modeling Toolbox"
         self.alias = ""
 
-        self.tools = [WatershedScaleDEMprocessing, BatchAggregate, BridgeCorrection, FlowDirForWS, CreateFromPointsAndSplits, TreeFromFlowDir, PlacePointsAlongReaches, ExtractWaterSurface]
+        self.tools = [WatershedScaleDEMprocessing, BatchAggregate, BridgeCorrection, FlowDirForWS,
+                      CreateFromPointsAndSplits, TreeFromFlowDir, PlacePointsAlongReaches, ExtractWaterSurface,
+                      SpatializeQLiDAR_gauging_stations]
