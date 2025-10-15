@@ -192,10 +192,10 @@ class ExtractWaterSurface(object):
         RID_field = parameters[1].valueAsText
         order_field = parameters[2].valueAsText
         links = parameters[3].valueAsText
-        routes_3m = parameters[4].valueAsText
-        RID_field_3m = parameters[5].valueAsText
-        links_3m = parameters[6].valueAsText
-        frompoints = parameters[7].valueAsText
+        frompoints = parameters[4].valueAsText
+        routes_3m = parameters[5].valueAsText
+        RID_field_3m = parameters[6].valueAsText
+        links_3m = parameters[7].valueAsText
         pts_table = parameters[8].valueAsText
         X_field_pts = parameters[9].valueAsText
         Y_field_pts = parameters[10].valueAsText
