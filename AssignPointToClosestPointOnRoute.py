@@ -7,7 +7,7 @@ import ArcpyGarbageCollector as gc
 
 def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes, routes_IDfield,
                                              points_onroute, points_onroute_RIDfield, points_onroute_distfield,
-                                             matching_fields_pts, matching_fields_targetpts, output_table, stat="MEAN"):
+                                             matching_fields_pts, matching_fields_targetpts, output_shp, stat="MEAN"):
 
     """ This tool searches the closest point on a reach for each point with a route ID. It returns a shapefile with
     the points on route selected and the original data from the points layer"""
@@ -83,7 +83,6 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
         for field in list_fields_to_keep:
             fields_to_keep.append(arcpy.Describe(points).basename + "." + field)
         fields_to_keep.append(os.path.basename(table) + ".NEAR_DIST")
-
         nparray = arcpy.da.FeatureClassToNumPyArray("points_lyr", fields_to_keep)
 
         # rename fields
@@ -99,24 +98,22 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
         # compute values for the same main channel points -> average
         idfield = nparray.dtype.names[0]
         means_ids = np.unique(nparray[[idfield]])
-        means = np.empty(means_ids.shape[0], dtype=nparray.dtype)
+        nparray_res = np.empty(means_ids.shape[0], dtype=nparray.dtype)
         i = 0
 
         for id in means_ids:
             tmp_all = nparray[np.where(nparray[[idfield]] == id)]
             if stat == "2-WAY CLOSEST":
-                means[i] = tmp_all[np.argmin(tmp_all["NEAR_DIST"])]
+                nparray_res[i] = tmp_all[np.argmin(tmp_all["NEAR_DIST"])]
             else:
-                means[i] = nparray[np.where(nparray[[idfield]] == id)][0]
+                nparray_res[i] = nparray[np.where(nparray[[idfield]] == id)][0]
                 for field in list_fields_to_keep:
                     if stat == "MEAN":
-                        means[field][i] = np.mean(tmp_all[field])
+                        nparray_res[field][i] = np.mean(tmp_all[field])
                     else: # stat == "MAX":
-                        means[field][i] = np.max(tmp_all[field])
+                        nparray_res[field][i] = np.max(tmp_all[field])
 
             i+=1
-
-        arcpy.da.NumPyArrayToTable(means, output_table)
 
     else:
         # stat == "CLOSEST"
@@ -169,16 +166,22 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
         for field in list_fields_to_keep:
             fields_to_keep.append(arcpy.Describe(points).basename + "." + field)
 
-        nparray = arcpy.da.FeatureClassToNumPyArray("onroute_lyr", fields_to_keep)
+        nparray_res = arcpy.da.FeatureClassToNumPyArray("onroute_lyr", fields_to_keep)
 
         # rename fields
         wanted_fields_name = onroute_fields_names[1:]
         for field in list_fields_to_keep:
             wanted_fields_name.append(field)
 
-        nparray.dtype.names = wanted_fields_name
+        nparray_res.dtype.names = wanted_fields_name
 
-        arcpy.da.NumPyArrayToTable(nparray, output_table)
+
+    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+    arcpy.da.NumPyArrayToTable(nparray_res, temp_outtable)
+    arcpy.MakeRouteEventLayer_lr(routes, routes_IDfield, temp_outtable,
+                                 points_onroute_RIDfield + " POINT " + points_onroute_distfield, "finalres_lyr")
+    arcpy.CopyFeatures_management("finalres_lyr", output_shp)
 
     arcpy.Delete_management("points_lyr")
     arcpy.Delete_management("onroute_lyr")
+
