@@ -100,6 +100,12 @@ class SpatializeQLiDAR_gauging_stations(object):
             datatype="GPDouble",
             parameterType="Required",
             direction="Input")
+        param_relatetable = arcpy.Parameter(
+            displayName="Relate table - Main routes to D8 correspondence",
+            name="relatetable",
+            datatype="GPTableView",
+            parameterType="Required",
+            direction="Input")
         param_output_points = arcpy.Parameter(
             displayName="Output: Points with spatialized Q",
             name="output_points",
@@ -127,11 +133,12 @@ class SpatializeQLiDAR_gauging_stations(object):
         param_DEMs_field.parameterDependencies = [param_DEMs_footprints.name]
         param_DEMs_field.value = "ID_DEM"
         param_beta.value = 1.0
+        param_relatetable.value = os.path.join(project_path, "Geometry.gdb", "fd_net_relatetable")
         param_output_points.value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized_D8")
 
         params = [param_r_flowacc, param_routes, param_RID_field, param_links, param_ptsonD8, param_Qpoints,
                   param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_Qdistance, param_Qcsv_file,
-                  param_DEMs_footprints, param_DEMs_field, param_beta, param_output_points]
+                  param_DEMs_footprints, param_DEMs_field, param_beta, param_relatetable, param_output_points]
         return params
 
     def isLicensed(self):
@@ -158,11 +165,12 @@ class SpatializeQLiDAR_gauging_stations(object):
         DEM_footprints = parameters[11].valueAsText
         DEM_fottprints_idfield = parameters[12].valueAsText
         beta_coef = float(parameters[13].valueAsText)
-        output_points = parameters[14].valueAsText
+        relatetable = parameters[14].valueAsText
+        output_points = parameters[15].valueAsText
 
         execute_SpatializeQ_from_gauging_stations(routes, links, RID_field, D8pathpoints, r_flowacc, Qpoints,
                                                   id_field_Qpoints, name_Qpoints, drainage_Qpoints, None, Qdistance,
                                                   csv_file, DEM_footprints,
-                                                  DEM_fottprints_idfield, beta_coef, output_points, messages)
+                                                  DEM_fottprints_idfield, beta_coef, relatetable, output_points, messages)
 
         return

@@ -319,7 +319,10 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
     #     arcpy.Delete_management(output_points)
     # arcpy.da.NumPyArrayToTable(finalarray, output_points)
 
-def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints, id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints, Q_field, points_tol, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef, output_points, messages):
+def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints,
+                                              id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints,
+                                              Q_field, points_tol, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef,
+                                              relatetable, output_points, messages):
     # Two cases :
     # - either Q_field is a field in the Q points with the discharges to spatialize (DEM_footprints and Qcsv_file must be None).
     #   This is used to spatialize flood discharges
@@ -527,8 +530,15 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
     temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
     targetcollection.save_points(temp_outtable)
     arcpy.MakeRouteEventLayer_lr(routes_D8, RID_field_D8, temp_outtable, RID_field_D8 + " POINT dist", "D8pts_lyr")
+    original_fields = [f.name for f in arcpy.Describe(temp_outtable).fields]
+    relatetable_fields = [f.name for f in arcpy.Describe(relatetable).fields]
+    arcpy.management.AddJoin("D8pts_lyr", RID_field_D8, relatetable, relatetable_fields[2])
     arcpy.CopyFeatures_management("D8pts_lyr", output_points)
-
-
-
+    aftercopy_fields = [f.name for f in arcpy.Describe(output_points).fields]
+    # Clean field names
+    for i, field in enumerate(original_fields):
+        if i>0: # keep the first OID field name
+            arcpy.AlterField_management(output_points, aftercopy_fields[i+1], field, field) # +1 because of the Shape field
+    arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+3], "RID_D8", "RID_D8")
+    arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+2], "RID_routesmain", "RID_routesmain")
 
