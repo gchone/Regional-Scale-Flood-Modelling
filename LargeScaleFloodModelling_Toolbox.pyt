@@ -11,6 +11,7 @@ from TreeFromFlowDir_Interface import *
 from PlacePointsAlongReaches_Interface import *
 from ExtractWaterSurface_Interface import *
 from SpatializeQLiDAR_from_gauging_stations_Interface import *
+from AssignPointToClosestPointOnRoute_Interface import *
 
 class Toolbox(object):
     def __init__(self):
@@ -20,4 +21,4 @@ class Toolbox(object):
 
         self.tools = [WatershedScaleDEMprocessing, BatchAggregate, BridgeCorrection, FlowDirForWS,
                       CreateFromPointsAndSplits, TreeFromFlowDir, PlacePointsAlongReaches, ExtractWaterSurface,
-                      SpatializeQLiDAR_gauging_stations]
+                      SpatializeQLiDAR_gauging_stations, AssignPointToClosestPointOnRoute]
