@@ -134,9 +134,9 @@ class ExtractWaterSurface(object):
             parameterType="Required",
             direction="Output")
         param_output_points = arcpy.Parameter(
-            displayName="Output: Points table",
+            displayName="Output: Points with extracted water surface",
             name="output_points",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
