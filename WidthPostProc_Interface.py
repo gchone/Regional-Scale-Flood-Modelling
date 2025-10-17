@@ -9,6 +9,7 @@
 
 
 from WidthAssessment import *
+import os
 
 class WidthPostProc(object):
     def __init__(self):
@@ -21,7 +22,7 @@ class WidthPostProc(object):
         param_network_shp = arcpy.Parameter(
             displayName="Network layer",
             name="network_shp",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_RID_field = arcpy.Parameter(
@@ -39,7 +40,7 @@ class WidthPostProc(object):
         param_network_main_only = arcpy.Parameter(
             displayName="Main Network (only) layer",
             name="network_main_only",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_RID_field_main = arcpy.Parameter(
@@ -69,7 +70,7 @@ class WidthPostProc(object):
         param_widthdata = arcpy.Parameter(
             displayName="Widthdata layer",
             name="widthdata",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_widthid = arcpy.Parameter(
@@ -123,24 +124,48 @@ class WidthPostProc(object):
         param_output_table = arcpy.Parameter(
             displayName="Output table",
             name="output_table",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
+        # Set default values similar to ExtractWaterSurface_Interface
+        project_path = arcpy.env.workspace
+        param_network_shp.value = os.path.join(project_path, "Geometry.gdb", "routes")
         param_RID_field.parameterDependencies = [param_network_shp.name]
+        param_RID_field.value = "RID"
         param_main_channel_field.parameterDependencies = [param_network_shp.name]
+        param_main_channel_field.value = "Main"
+        param_network_main_only.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
         param_RID_field_main.parameterDependencies = [param_network_main_only.name]
+        param_RID_field_main.value = "RID"
         param_network_main_l_field.parameterDependencies = [param_network_main_only.name]
+        param_network_main_l_field.value = "Shape_Length"
         param_order_field.parameterDependencies = [param_network_main_only.name]
+        param_order_field.value = "Qorder"
+        param_network_main_only_links.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
+        param_widthdata.value = os.path.join(project_path, "Width.gdb", "width_pts")
         param_widthid.parameterDependencies = [param_widthdata.name]
+        param_widthid.value = "CSid"
         param_width_RID_field.parameterDependencies = [param_widthdata.name]
+        param_width_RID_field.value = "RID"
         param_width_distance.parameterDependencies = [param_widthdata.name]
+        param_width_distance.value = "Distance_m"
         param_width_field.parameterDependencies = [param_widthdata.name]
+        param_width_field.value = "Width_m"
+        param_datapoints.value = os.path.join(project_path, "WaterSurface.gdb", "smoothed_pts")
         param_id_field_datapts.parameterDependencies = [param_datapoints.name]
+        param_id_field_datapts.value = "ObjectID_1"
         param_distance_field_datapts.parameterDependencies = [param_datapoints.name]
+        param_distance_field_datapts.value = "MEAS"
         param_rid_field_datapts.parameterDependencies = [param_datapoints.name]
+        param_rid_field_datapts.value = "RID"
+        param_output_table.value = os.path.join(project_path, "Width.gdb", "width_postpro")
 
-        params = [param_network_shp, param_RID_field, param_main_channel_field, param_network_main_only, param_RID_field_main, param_network_main_l_field, param_order_field, param_network_main_only_links, param_widthdata, param_widthid, param_width_RID_field, param_width_distance, param_width_field, param_datapoints, param_id_field_datapts, param_distance_field_datapts, param_rid_field_datapts, param_output_table]
+        params = [param_network_shp, param_RID_field, param_main_channel_field, param_network_main_only,
+                  param_RID_field_main, param_network_main_l_field, param_order_field, param_network_main_only_links,
+                  param_widthdata, param_widthid, param_width_RID_field, param_width_distance, param_width_field,
+                  param_datapoints, param_id_field_datapts, param_distance_field_datapts, param_rid_field_datapts,
+                  param_output_table]
 
         return params
 
