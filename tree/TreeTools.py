@@ -571,7 +571,7 @@ def createFullTreeTableFromShapefile(route_shapefile, routeID_field, IDlink1name
         junctionid_name = arcpy.Describe(junctions).OIDFieldName
 
         # Add a id ("FEAT_SEQ") to the junction grouping junctions at the same place (same place = same id))
-        junctions_table = gc.CreateScratchName("table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
+        junctions_table = gc.CreateScratchName("table", data_type="ArcInfoTable", workspace="in_memory")
         arcpy.FindIdentical_management(junctions, junctions_table, ["Shape"])
         arcpy.JoinField_management(junctions, junctionid_name, junctions_table, "IN_FID")
         # Add also the rivernet data into the junctions files (make the query to treat the main channel in priority easier after)
