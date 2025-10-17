@@ -552,7 +552,7 @@ def execute_largeurpartransect(streamnetwork, idfield, riverbed, ineffarea, maxw
         transectsauxpointsdemesure(streamnetwork, idfield, cspoints, csfield, distfield,
                                    maxwidth, riverbanks, transects)
 
-        widthfield = "Largeur_m"  # HARDCODED
+        widthfield = "Width_m"  # HARDCODED
         largeurdestransects(streamnetwork, transects, widthfield)
 
         nx = 2  # Nombre de croisements tolérés
@@ -567,7 +567,7 @@ def execute_largeurpartransect(streamnetwork, idfield, riverbed, ineffarea, maxw
     return
 
 
-def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, output_table, messages):
+def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, ouput_shp, messages):
     try:
         messages.addMessage("Processing main channels")
         ### 1a - Project points in the main channel on the main_only network
@@ -606,6 +606,7 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
         targetcollection.load_table(datapoints)
 
         interp_main_width_pts_np = InterpolatePoints_with_objects(network, width_pts_collection, [width_field], targetcollection, "CONFLUENCE")
+
 
         ### 2a - Project width point of secondary channels on the main_only network
         arcpy.MakeFeatureLayer_management(widthdata, "width_second_lyr")
@@ -658,7 +659,6 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
         for rid in secondary_RIDs:
             i+=1
             messages.addMessage("Processing secondary channels (" + str(i) + "/" + str(len(secondary_RIDs)) + ")")
-            print(rid[0])
             # take secondary channel points
             subdatasample = datacollection._numpyarray[datacollection._numpyarray[secondary_channel_RID_field] == rid[0]]
             # make sure they are ordered
@@ -758,11 +758,17 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
             for pt in downprojectedpts:
                 reach = network.get_reach(projecteddownpt[RID_field_main])
                 reachdist = 0
+                skip_pt = False
                 while (reach.id != pt[RID_field_main]):
                     if reach.is_downstream_end():
-                        raise IndexError
+                        # The reach of the projected point was not found downstream
+                        # It means it comes from a tributary and must be skipped
+                        skip_pt = True
+                        break
                     reach = reach.get_downstream_reach()
                     reachdist += reach.length
+                if skip_pt:
+                    continue
                 distance = projecteddownpt[
                     datacollection.dict_attr_fields['dist']] - pt[datacollection.dict_attr_fields['dist']] + reachdist
                 if distance > maxdist:
@@ -778,12 +784,17 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
             for pt in downprojectedpts2:
                 reach = network.get_reach(projecteddownpt[RID_field_main])
                 reachdist = 0
-
+                skip_pt = False
                 while (reach.id != pt[RID_field_main]):
                     if reach.is_downstream_end():
-                        raise IndexError
+                        # The reach of the projected point was not found downstream
+                        # It means it comes from a tributary and must be skipped
+                        skip_pt = True
+                        break
                     reach = reach.get_downstream_reach()
                     reachdist += reach.length
+                if skip_pt:
+                    continue
                 distance = projecteddownpt[
                     datacollection.dict_attr_fields['dist']] - pt[width_pts_collection.dict_attr_fields['dist']] + reachdist
                 if distance > maxdist:
@@ -810,10 +821,15 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
             tmp_np = np.sort(tmp_np, order=id_field_datapts)
             interp_main_width_pts_np[width_field] = interp_main_width_pts_np[width_field]+tmp_np[width_field]
 
-        if arcpy.env.overwriteOutput and arcpy.Exists(output_table):
-            arcpy.Delete_management(output_table)
+        if arcpy.env.overwriteOutput and arcpy.Exists(ouput_shp):
+            arcpy.Delete_management(ouput_shp)
 
-        arcpy.da.NumPyArrayToTable(interp_main_width_pts_np, output_table)
+
+        temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+        arcpy.da.NumPyArrayToTable(interp_main_width_pts_np, temp_outtable)
+        arcpy.MakeRouteEventLayer_lr(network_main_only, RID_field_main, temp_outtable,
+                                     rid_field_datapts + " POINT " + distance_field_datapts, "pts_lyr")
+        arcpy.CopyFeatures_management("pts_lyr", ouput_shp)
 
 
     finally:
