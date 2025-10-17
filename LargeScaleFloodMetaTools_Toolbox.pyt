@@ -8,7 +8,7 @@ from OrderReaches_Interface import *
 from FlowDirNetwork_Interface import *
 from ExtractDischarges_Interface import *
 from SpatializeQ_Interface import *
-from WidthPostProc_Interface import *
+
 from BedAssessment_Interface import *
 from SpatializeQflood_from_gauging_stations_Interface import *
 
@@ -19,5 +19,5 @@ class Toolbox(object):
         self.label = "Metatools for linear referencing"
         self.alias = ""
 
-        self.tools = [OrderReaches, FlowDirNetwork, ExtractDischarges, SpatializeQ, WidthPostProc, BedAssessment, SpatializeQflood_gauging_stations]
+        self.tools = [OrderReaches, FlowDirNetwork, ExtractDischarges, SpatializeQ,  BedAssessment, SpatializeQflood_gauging_stations]
 

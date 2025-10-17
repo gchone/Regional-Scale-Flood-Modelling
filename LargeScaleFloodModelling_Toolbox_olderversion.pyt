@@ -4,7 +4,7 @@ import arcpy
 
 from RelateNetworks_Interface import *
 from LocatePointsAlongRoutes_Interface import *
-from LargeurParTransect_Interface import *
+
 
 
 from CreateTreeFromShapefile_Interface import *
@@ -31,5 +31,5 @@ class Toolbox(object):
         self.label = "Large Scale Flood Modeling Toolbox - detailed processing"
         self.alias = ""
 
-        self.tools = [SpatializeQ_rasters, D8toD4, RunSim_LISFLOOD, DefBciWithLateralWlakes_hdown, CreateZonesWlakes, TopologicalRelateNetworks, BedAssessmentIterations, DownstreamSlope, InterpolatePoints, RelateNetworks, LocatePointsAlongRoutes, LargeurParTransect, CreateTreeFromShapefile,  LocateMostDownstreamPoints, WSsmoothing]
+        self.tools = [SpatializeQ_rasters, D8toD4, RunSim_LISFLOOD, DefBciWithLateralWlakes_hdown, CreateZonesWlakes, TopologicalRelateNetworks, BedAssessmentIterations, DownstreamSlope, InterpolatePoints, RelateNetworks, LocatePointsAlongRoutes, CreateTreeFromShapefile,  LocateMostDownstreamPoints, WSsmoothing]
 
