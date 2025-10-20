@@ -109,7 +109,7 @@ class AssignPointToClosestPointOnRoute(object):
 
         param_stat.filter.type = "ValueList"
         param_stat.filter.list = ["MEAN", "CLOSEST", "MAX"]
-        param_stat.value = "MEAN"
+        param_stat.value = "CLOSEST"
 
         param_routes.filter.list = ["Polyline"]
         param_routes.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
@@ -142,7 +142,7 @@ class AssignPointToClosestPointOnRoute(object):
             if parameters[0].valueAsText == "LiDAR discharge":
                 parameters[1].value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized_D8")
                 parameters[2].value = "computedQLiDAR"
-                parameters[3].value = "MEAN"
+                parameters[3].value = "CLOSEST"
                 parameters[4].value = os.path.join(project_path, "Geometry.gdb", "routes_main")
                 parameters[5].value = "RID"
                 parameters[6].value = os.path.join(project_path, "WaterSurface.gdb", "smoothed_pts")
