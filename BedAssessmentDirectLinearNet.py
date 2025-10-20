@@ -167,7 +167,11 @@ def execute_BedAssessment(route, route_RID_field, route_order_field, routelinks,
     points_coll.add_SavedVariable("h", "float")
     points_coll.add_SavedVariable("s", "float")
     points_coll.add_SavedVariable("Fr", "float")
-    points_coll.save_points(output_pts)
+
+    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+    points_coll.save_points(temp_outtable)
+    arcpy.MakeRouteEventLayer_lr(route, route_RID_field, temp_outtable, points_RIDfield + " POINT " + points_distfield, "pts_lyr")
+    arcpy.CopyFeatures_management("pts_lyr", output_pts)
 
 
 
@@ -303,7 +307,10 @@ def execute_PostSmoothing(route, route_RID_field, route_order_field, routelinks,
     #points_coll.add_SavedVariable("z", "float")
     points_coll.add_SavedVariable("smooth_level", "int")
 
-    points_coll.save_points(output_pts)
+    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+    points_coll.save_points(temp_outtable)
+    arcpy.MakeRouteEventLayer_lr(route, route_RID_field, temp_outtable, points_RIDfield + " POINT " + points_distfield, "pts_lyr")
+    arcpy.CopyFeatures_management("pts_lyr", output_pts)
 
     return
 
