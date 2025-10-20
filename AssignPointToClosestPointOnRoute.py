@@ -17,6 +17,14 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
     # Example: ["RID", "ID_DEM"] and ["RID", "ID_DEM"] - This will match together only points on the same Route ID and
     # on the same DEM. Most often this tool would be used to match only the RID, so using ["RID"] and ["RID"]
 
+    # stat can be "MEAN", "MAX", "CLOSEST" or "2-WAY CLOSEST"
+    # "MEAN" and "MAX": each data point will be assigned to the closest point on route, then for each point on route,
+    # the mean or max value of all the data points assigned to it will be calculated.
+    # "2-WAY CLOSEST": each data point will be assigned to the closest point on route, then for each point on route,
+    # only the closest of all the data points assigned to it will be kept.
+    # "CLOSEST": each point on route will be assigned the value of the closest data point.
+
+
     arcpy.MakeFeatureLayer_management(points, "points_lyr")
     # Layer for the points on route: made by Make Route Event Layer to use the linear referencing
     arcpy.MakeRouteEventLayer_lr(routes, routes_IDfield, points_onroute,
@@ -127,17 +135,20 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
             i = 0
             for field in matching_fields_pts:
                 if i != 0 : request += " AND "
-                request += field + " = " + str(matching_elements[i])
+                element = str(matching_elements[i])
+                if not element.isnumeric(): element = "'" + element + "'" # Put text between quotation marks
+                request += field + " = " + element
                 i += 1
             arcpy.SelectLayerByAttribute_management("points_lyr", "NEW_SELECTION", request)
             request = ""
             i = 0
             for field in matching_fields_targetpts:
                 if i != 0: request += " AND "
-                request += field + " = " + str(matching_elements[i])
+                element = str(matching_elements[i])
+                if not element.isnumeric(): element = "'" + element + "'"  # Put text between quotation marks
+                request += field + " = " + element
                 i += 1
             arcpy.SelectLayerByAttribute_management("onroute_lyr", "NEW_SELECTION", request)
-
             # For the each points and points on route with the same RID, we generate a near table that will keep only the closest
             # data point to the point on route.
             table = gc.CreateScratchName("nt", data_type="ArcInfoTable", workspace="in_memory")
@@ -148,7 +159,6 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
         arcpy.Merge_management(list_tables, table)
         arcpy.SelectLayerByAttribute_management("points_lyr", "CLEAR_SELECTION")
         arcpy.SelectLayerByAttribute_management("onroute_lyr", "CLEAR_SELECTION")
-
         # Join tables in order to have the data from the points on route linked with the data points
         onroute_lyr_IDfield = arcpy.Describe("onroute_lyr").OIDFieldName
         points_lyr_IDfield = arcpy.Describe("points_lyr").OIDFieldName
@@ -158,15 +168,19 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
                                  points_lyr_IDfield,
                                  "KEEP_COMMON")
 
-        total_fields_list = [str(f.name) for f in arcpy.ListFields("onroute_lyr")]
+        # Added a temporary copy of the onroute_lyr to avoid issues with the join when using FeatureClassToNumPyArray
+        temp_onroutespts = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+        arcpy.CopyFeatures_management("onroute_lyr", temp_onroutespts)
+        total_fields_list = [str(f.name) for f in arcpy.ListFields(temp_onroutespts)]
         onroute_fields_names = [str(f.name) for f in arcpy.ListFields(points_onroute)]
-        data_fields_names = [str(f.name) for f in arcpy.ListFields("points_lyr")]
+        #data_fields_names = [str(f.name) for f in arcpy.ListFields("points_lyr")]
         fields_to_keep = total_fields_list[1:len(onroute_fields_names)]
 
         for field in list_fields_to_keep:
-            fields_to_keep.append(arcpy.Describe(points).basename + "." + field)
+            fields_to_keep.append(arcpy.Describe(points).basename + "_" + field)
 
-        nparray_res = arcpy.da.FeatureClassToNumPyArray("onroute_lyr", fields_to_keep)
+        nparray_res = arcpy.da.FeatureClassToNumPyArray(temp_onroutespts, fields_to_keep)
+
 
         # rename fields
         wanted_fields_name = onroute_fields_names[1:]
