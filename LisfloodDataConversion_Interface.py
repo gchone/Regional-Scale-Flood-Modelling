@@ -6,7 +6,7 @@ from LargeScaleFloodMetaTools import execute_LisfloodDataConversion
 
 class LisfloodDataConversion(object):
     def __init__(self):
-        self.label = "Lisflood Preparation"
+        self.label = "D4 flow direction and Lisflood data conversion"
         self.description = "Automates the preparation of Lisflood inputs, including D4 flow direction, network extraction, and bathymetry/width processing."
         self.canRunInBackground = True
 
@@ -156,7 +156,7 @@ class LisfloodDataConversion(object):
         param_lidar10m_fd.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_fd")
         param_lidar10m_fill.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_fill")
         param_from_pts.value = os.path.join(project_root, "Geometry.gdb", "from_pts")
-        param_workspace.value = project_root
+        param_workspace.value = os.path.join(project_root, "temp")
         param_routes_main.value = os.path.join(project_root, "Geometry.gdb", "routes_main")
         param_routes_main_links.value = os.path.join(project_root, "Geometry.gdb", "routes_main_links")
         param_routes_RID_field.parameterDependencies = [param_routes_main.name]
