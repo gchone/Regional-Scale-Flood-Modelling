@@ -7,7 +7,7 @@ import numpy as np
 
 from tree.RiverNetwork import *
 
-def execute_InterpolatePoints(points_table, id_field_pts, RID_field_pts, Distance_field_pts, data_fields, targetpoints, id_field_target, RID_field_target, Distance_field_target, network_shp, links_table, network_RID_field, order_field, ouput_table, extrapolation_value=None):
+def execute_InterpolatePoints(points_table, id_field_pts, RID_field_pts, Distance_field_pts, data_fields, targetpoints, id_field_target, RID_field_target, Distance_field_target, network_shp, links_table, network_RID_field, order_field, ouput_pts, extrapolation_value=None):
     # extrapolation_value = None : first upstream (or last downstream value) in the data copied for target points more downstream (or upstream)
     # extrapolation_value = "CONFLUENCE" : same as extrapolation_value = None, with in addition no interpolation at confluences (first upstream value used) (used for width)
     # extrapolation_value numeric : value used downstream (or upstream) of data values
@@ -33,7 +33,11 @@ def execute_InterpolatePoints(points_table, id_field_pts, RID_field_pts, Distanc
 
     newarray = InterpolatePoints_with_objects(network, datacollection, data_fields, targetcollection, extrapolation_value)
 
-    arcpy.da.NumPyArrayToTable(newarray, ouput_table)
+    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+    arcpy.da.NumPyArrayToTable(newarray, temp_outtable)
+    arcpy.MakeRouteEventLayer_lr(network_shp, network_RID_field, temp_outtable,
+                                 RID_field_target + " POINT " + Distance_field_target, "finalres_lyr")
+    arcpy.CopyFeatures_management("finalres_lyr", ouput_pts)
 
 
 def InterpolatePoints_with_objects(network, datacollection, data_fields, targetcollection, extrapolation_value, subdatasample = None):

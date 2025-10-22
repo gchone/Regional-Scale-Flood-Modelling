@@ -92,7 +92,7 @@ class InterpolatePoints(object):
         param_output_points = arcpy.Parameter(
             displayName="Points Output table",
             name="output_points",
-            datatype="GPTableView",
+            datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Output")
 
@@ -137,10 +137,10 @@ class InterpolatePoints(object):
         network_RID_field = parameters[10].valueAsText
         order_field = parameters[11].valueAsText
         links_table= parameters[12].valueAsText
-        ouput_table = parameters[13].valueAsText
+        ouput_pts = parameters[13].valueAsText
 
         execute_InterpolatePoints(points_table, id_field_pts, RID_field_pts, Distance_field_pts, data_fields,
                                   targetpoints, id_field_target, RID_field_target, Distance_field_target, network_shp,
-                                  links_table, network_RID_field, order_field, ouput_table)
+                                  links_table, network_RID_field, order_field, ouput_pts)
 
         return
