@@ -310,7 +310,7 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
                 arcpy.Delete_management(str_output_points)
             temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
             arcpy.da.NumPyArrayToTable(pointsarray, temp_outtable)
-            arcpy.MakeRouteEventLayer_lr(route_shapefile, routeID_field, temp_outtable, routeID_field + " POINT dist",
+            arcpy.MakeRouteEventLayer_lr(route_shapefile, routeID_field, temp_outtable, "RID POINT dist",
                                          "D8pts_lyr")
             arcpy.CopyFeatures_management("D8pts_lyr", str_output_points)
 
