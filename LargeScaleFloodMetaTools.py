@@ -8,6 +8,7 @@ from LocatePointsAlongRoutes import *
 from AssignPointToClosestPointOnRoute import *
 from InterpolatePoints import *
 from WSsmoothing import *
+from D8toD4 import *
 import ArcpyGarbageCollector as gc
 from tree.TreeTools import *
 from numpy.lib import recfunctions as rfn
@@ -545,4 +546,84 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
             arcpy.AlterField_management(output_points, aftercopy_fields[i+1], field, field) # +1 because of the Shape field
     arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+3], "RID_D8", "RID_D8")
     arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+2], "RID_routesmain", "RID_routesmain")
+
+def execute_LisfloodDataConversion(
+    lidar10m_fd, lidar10m_fill, from_pts, workspace,
+    routes_main, routes_main_links, routes_RID_field, routes_QOrder_field,
+    bathy_pts, bathy_value_field, bathy_RID_field, bathy_dist_field, width_pts, width_value_field, width_RID_field, width_dist_field, d4fd, routesD4, linksD4,
+        pathpointsD4, D4fd_net_relatetable, bathy_output_raster, width_output_raster, messages):
+    # Create D4 network and spatialize bathymetry and width along this network
+    # Outputs are:
+    #   d4fd (Lisflood_inputs.gdb\d4fd): the D4 flow direction raster
+    #   routesD4 (Lisflood_inputs.gdb\routesD4): the D4 river network
+    #   linksD4 (Lisflood_inputs.gdb\linksD4): the D4 river network links
+    #   pathpointsD4 (Lisflood_inputs.gdb\pathpointsD4): the D4 river network pathpoints
+    #   D4fd_net_relatetable (Lisflood_inputs.gdb\D4fd_net_relatetable): the D4 network relate table
+    #   bathy_output_raster (Lisflood_inputs.gdb\bathy): raster of bathymetry values along the D4 network
+    #   width_output_raster (Lisflood_inputs.gdb\width): raster of width values along the D4 network
+
+    # Step 1: D4 flow direction
+    messages.addMessage('Extracting D4 flow direction network...')
+    with arcpy.EnvManager(scratchWorkspace=workspace):
+        execute_D8toD4(lidar10m_fd, lidar10m_fill, from_pts, d4fd, messages, language="EN")
+
+    d4fd = arcpy.Raster(d4fd)
+    # Step 2: Flow Direction Network
+    execute_FlowDirNetwork(routes_main, routes_main_links, routes_RID_field, d4fd, routesD4, linksD4, pathpointsD4, D4fd_net_relatetable, messages)
+
+    # Step 3: Add Qorder field
+    if routes_QOrder_field not in [f.name for f in arcpy.ListFields(routesD4)]:
+        arcpy.AddField_management(routesD4, routes_QOrder_field, 'SHORT')
+
+    # Step 4: Join D4fd_net_relatetable to routesD4, then join routes_main to routesD4
+    routesD4_lyr = arcpy.MakeFeatureLayer_management(routesD4, "routesD4_lyr")
+    relatetable_field = [f.name for f in arcpy.Describe(D4fd_net_relatetable).fields]
+    arcpy.management.AddJoin("routesD4_lyr", routes_RID_field, D4fd_net_relatetable, relatetable_field[2])
+    routesD4_mainRID = arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[2]
+    arcpy.management.AddJoin("routesD4_lyr", routesD4_mainRID, routes_main, routes_RID_field)
+
+    # Step 5: Copy Qorder values
+    arcpy.management.CalculateField("routesD4_lyr", routes_QOrder_field, '!'+ arcpy.Describe(routes_main).basename + "." + routes_RID_field +'!', 'PYTHON3')
+
+    # Step 6: Bed elevation workflow
+    messages.addMessage('Processing bathymetry...')
+    arcpy.MakeRouteEventLayer_lr(routes_main, routes_RID_field, bathy_pts, bathy_RID_field + ' Point ' + bathy_dist_field, "bathy_on_mainroute")
+    arcpy.AddJoin_management("bathy_on_mainroute", bathy_RID_field, D4fd_net_relatetable, routes_RID_field)
+    bathy_on_D4 = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_AssignPointToClosestPointOnRoute("bathy_on_mainroute", [bathy_value_field], routesD4, routes_RID_field,
+                                             pathpointsD4, 'RID', 'dist',
+                                             [arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[2]], [routes_RID_field], bathy_on_D4, "MAX")
+
+    bathy_final = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_InterpolatePoints(bathy_on_D4, 'id', 'RID', 'dist', [bathy_value_field],
+                              pathpointsD4, 'id', 'RID', 'dist', routesD4,
+                              linksD4, routes_RID_field, routes_QOrder_field, bathy_final)
+    bathy_final_events = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    arcpy.MakeRouteEventLayer_lr(routesD4, routes_RID_field, bathy_final, 'RID Point dist', bathy_final_events)
+
+    with arcpy.EnvManager(snapRaster=lidar10m_fd):
+        with arcpy.EnvManager(extent=lidar10m_fd):
+            with arcpy.EnvManager(outputCoordinateSystem=lidar10m_fd):
+                arcpy.PointToRaster_conversion(bathy_final_events, bathy_value_field, bathy_output_raster, cell_assignment='MOST_FREQUENT', priority_field=None, cellsize=lidar10m_fd)
+
+    # Step 7: Width workflow
+    messages.addMessage('Processing width...')
+    arcpy.MakeRouteEventLayer_lr(routes_main, routes_RID_field, width_pts, width_RID_field + ' Point ' + width_dist_field, "width_on_mainroute")
+    arcpy.AddJoin_management("width_on_mainroute", width_RID_field, D4fd_net_relatetable, routes_RID_field)
+    width_on_D4 = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_AssignPointToClosestPointOnRoute("width_on_mainroute", [width_value_field], routesD4, routes_RID_field,
+                                             pathpointsD4, 'RID', 'dist',
+                                             [arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[2]], [routes_RID_field], width_on_D4, "MEAN")
+
+    width_final = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_InterpolatePoints(width_on_D4, 'id', 'RID', 'dist', [width_value_field],
+                              pathpointsD4, 'id', 'RID', 'dist', routesD4,
+                              linksD4, routes_RID_field, routes_QOrder_field, width_final)
+    width_final_events = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    arcpy.MakeRouteEventLayer_lr(routesD4, routes_RID_field, width_final, 'RID Point dist', width_final_events)
+
+    with arcpy.EnvManager(snapRaster=lidar10m_fd):
+        with arcpy.EnvManager(extent=lidar10m_fd):
+            with arcpy.EnvManager(outputCoordinateSystem=lidar10m_fd):
+                arcpy.PointToRaster_conversion(width_final_events, width_value_field, width_output_raster, cell_assignment='MOST_FREQUENT', priority_field=None, cellsize=lidar10m_fd)
 
