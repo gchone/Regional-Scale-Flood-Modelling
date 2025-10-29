@@ -16,6 +16,8 @@ from LargeurParTransect_Interface import *
 from WidthPostProc_Interface import *
 from BedAssessment_Interface import *
 from LisfloodDataConversion_Interface import *
+from CreateZones_Interface import *
+from DefBci_Interface import *
 
 class Toolbox(object):
     def __init__(self):
@@ -26,4 +28,4 @@ class Toolbox(object):
         self.tools = [WatershedScaleDEMprocessing, BatchAggregate, BridgeCorrection, FlowDirForWS,
                       CreateFromPointsAndSplits, TreeFromFlowDir, PlacePointsAlongReaches, ExtractWaterSurface,
                       SpatializeQLiDAR_gauging_stations, AssignPointToClosestPointOnRoute, LargeurParTransect,
-                      WidthPostProc, BedAssessment, LisfloodDataConversion]
+                      WidthPostProc, BedAssessment, LisfloodDataConversion, DefBciWithLateralWlakes_hdown, CreateZonesWlakes]
