@@ -21,6 +21,8 @@ class pointflowpath:
 def execute_DefBCI(r_flowdir, r_flowacc, percent, str_zonesfolder,
                    r_dem, r_width, r_zbed, r_manning, r_mask, str_outputfolder, messages):
 
+    if not os.path.isdir(str_outputfolder):
+        os.makedirs(str_outputfolder)
 
     save_inbci = str_zonesfolder + "\\inbci.shp"
     save_outbci = str_zonesfolder + "\\outbci.shp"
@@ -108,6 +110,8 @@ def execute_DefBCI(r_flowdir, r_flowacc, percent, str_zonesfolder,
 
             currentflowacc = flowacc.getValue(currentrow, currentcol)
 
+            if currentflowacc == 0:
+                raise Exception("Flow accumulation value of zero uncountered. Check that source points are located on the flow network.")
 
             if 100. * float(currentflowacc - lastflowacc) / float(
                     lastflowacc) >= percent:
