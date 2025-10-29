@@ -100,7 +100,32 @@ class DefBciWithLateralWlakes_hdown(object):
             parameterType="Required",
             direction="Input")
 
+        # set default percent
         param_percent.value = 1
+
+        # restrict workspace selection to filesystem
+        param0.filter.list = ["File System"]
+
+        # Determine project root from arcpy env, with sensible fallbacks
+        project_root = arcpy.env.workspace
+
+        # Common dataset locations used across this toolbox
+        param_flowdir.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_fd")
+        param_flowacc.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_facc")
+        param_zones.value = os.path.join(project_root, "Tiles")
+        param_dem.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_avg")
+        # D4 outputs produced by LisfloodDataConversion/I/O
+        param_width.value = os.path.join(project_root, "Lisflood_inputs.gdb", "width_lisflood")
+        param_zbed.value = os.path.join(project_root, "Lisflood_inputs.gdb", "bathy_lisflood")
+        param_manning.value = os.path.join(project_root, "Lisflood_inputs.gdb", "n_floodplain")
+        # channel mask common location
+        param_mask.value = os.path.join(project_root, "Lisflood_inputs.gdb", "mask")
+        # default output folder: project_root / Lisflood_inputs
+        param_output.value = os.path.join(project_root, "Sims")
+
+        param0.value =  os.path.join(project_root, "temp")
+
+
 
         params = [param_flowdir, param_flowacc, param_percent, param_zones, param_dem, param_width, param_zbed, param_manning, param_mask, param_output, param0]
 
@@ -135,11 +160,10 @@ class DefBciWithLateralWlakes_hdown(object):
 
         str_outputfolder = parameters[9].valueAsText
 
-        arcpy.env.scratchWorkspace = parameters[10].valueAsText
-
-        execute_DefBCI(arcpy.Raster(str_flowdir), arcpy.Raster(str_flowacc), percent, str_zonesfolder,
-                       arcpy.Raster(str_dem), arcpy.Raster(str_width), arcpy.Raster(str_zbed), arcpy.Raster(str_manning),
-                       arcpy.Raster(str_mask), str_outputfolder, messages)
+        with arcpy.EnvManager(scratchWorkspace=parameters[10].valueAsText):
+            execute_DefBCI(arcpy.Raster(str_flowdir), arcpy.Raster(str_flowacc), percent, str_zonesfolder,
+                           arcpy.Raster(str_dem), arcpy.Raster(str_width), arcpy.Raster(str_zbed), arcpy.Raster(str_manning),
+                           arcpy.Raster(str_mask), str_outputfolder, messages)
 
 
         return
