@@ -61,6 +61,12 @@ class WidthPostProc(object):
             datatype="Field",
             parameterType="Required",
             direction="Input")
+        param_routes_links = arcpy.Parameter(
+            displayName="Full network links table",
+            name="routes_links",
+            datatype="GPTableView",
+            parameterType="Required",
+            direction="Input")
         param_network_main_only_links = arcpy.Parameter(
             displayName="Main Network (only) links",
             name="network_main_only_links",
@@ -142,6 +148,7 @@ class WidthPostProc(object):
         param_network_main_l_field.value = "Shape_Length"
         param_order_field.parameterDependencies = [param_network_main_only.name]
         param_order_field.value = "Qorder"
+        param_routes_links.value = os.path.join(project_path, "Geometry.gdb", "routes_links")
         param_network_main_only_links.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
         param_widthdata.value = os.path.join(project_path, "Width.gdb", "width_pts")
         param_widthid.parameterDependencies = [param_widthdata.name]
@@ -162,7 +169,7 @@ class WidthPostProc(object):
         param_output_table.value = os.path.join(project_path, "Width.gdb", "width_postpro")
 
         params = [param_network_shp, param_RID_field, param_main_channel_field, param_network_main_only,
-                  param_RID_field_main, param_network_main_l_field, param_order_field, param_network_main_only_links,
+                  param_RID_field_main, param_network_main_l_field, param_order_field, param_routes_links, param_network_main_only_links,
                   param_widthdata, param_widthid, param_width_RID_field, param_width_distance, param_width_field,
                   param_datapoints, param_id_field_datapts, param_distance_field_datapts, param_rid_field_datapts,
                   param_output_table]
@@ -186,17 +193,17 @@ class WidthPostProc(object):
         RID_field_main = parameters[4].valueAsText
         network_main_l_field = parameters[5].valueAsText
         order_field = parameters[6].valueAsText
-        network_main_only_links = parameters[7].valueAsText
-        widthdata = parameters[8].valueAsText
-        widthid = parameters[9].valueAsText
-        width_RID_field = parameters[10].valueAsText
-        width_distance = parameters[11].valueAsText
-        width_field = parameters[12].valueAsText
-        datapoints = parameters[13].valueAsText
-        id_field_datapts = parameters[14].valueAsText
-        distance_field_datapts = parameters[15].valueAsText
-        rid_field_datapts = parameters[16].valueAsText
-        output_table = parameters[17].valueAsText
+        routes_links = parameters[7].valueAsText
+        network_main_only_links = parameters[8].valueAsText
+        widthdata = parameters[9].valueAsText
+        widthid = parameters[10].valueAsText
+        width_RID_field = parameters[11].valueAsText
+        width_distance = parameters[12].valueAsText
+        width_field = parameters[13].valueAsText
+        datapoints = parameters[14].valueAsText
+        id_field_datapts = parameters[15].valueAsText
+        distance_field_datapts = parameters[16].valueAsText
+        rid_field_datapts = parameters[17].valueAsText
 
         execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, output_table, messages)
 

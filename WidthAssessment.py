@@ -567,7 +567,7 @@ def execute_largeurpartransect(streamnetwork, idfield, riverbed, ineffarea, maxw
     return
 
 
-def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, ouput_shp, messages):
+def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, routes_links, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, ouput_shp, messages):
     try:
         messages.addMessage("Processing main channels")
         ### 1a - Project points in the main channel on the main_only network
@@ -609,24 +609,89 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
 
 
         ### 2a - Project width point of secondary channels on the main_only network
+        search_distance = 10000  # in meters
         arcpy.MakeFeatureLayer_management(widthdata, "width_second_lyr")
         arcpy.AddJoin_management("width_second_lyr", width_RID_field, network_shp, RID_field)
-        arcpy.SelectLayerByAttribute_management("width_second_lyr", "NEW_SELECTION",
-                                                arcpy.Describe(network_shp).basename + "." + main_channel_field + " = 0")
+        secondary_width_pts = gc.CreateScratchName("pts", data_type="ArcInfoTable",
+                                                   workspace=arcpy.env.scratchWorkspace)
+        # arcpy.SelectLayerByAttribute_management("width_second_lyr", "NEW_SELECTION",
+        #                                         arcpy.Describe(network_shp).basename + "." + main_channel_field + " = 0")
+        # arcpy.LocateFeaturesAlongRoutes_lr("width_second_lyr", network_main_only, RID_field_main, 10000, secondary_width_pts,
+        #                                  RID_field_main + " POINT MEAS", distance_field="NO_DISTANCE")
+
+        # Previous solution does not work  if the secondary channel is close to several main channels
+        # Replaced by the following process:
+        # - The secondary channels are followed downstream until they reach a main channel
+        # - The secondary channel points are projected on the identified main channel
+
+        messages.addMessage("Projecting secondary channel points on main channels")
+        # Identify secondary channels
 
 
-        secondary_width_pts = gc.CreateScratchName("pts", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
 
-        # Points on secondary channels are projected on the closest main channel
-        arcpy.LocateFeaturesAlongRoutes_lr("width_second_lyr", network_main_only, RID_field_main, 10000, secondary_width_pts,
-                                         RID_field_main + " POINT MEAS", distance_field="NO_DISTANCE")
+        arcpy.SelectLayerByAttribute_management("network_lyr", "CLEAR_SELECTION")
+        splitted_spatialjoin = gc.CreateScratchName("net", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
+        fm_RIDslit = arcpy.FieldMap()
+        fm_RIDunsplit = arcpy.FieldMap()
+        fms = arcpy.FieldMappings()
+        fm_RIDslit.addInputField("network_lyr", RID_field)
+        fm_RIDunsplit.addInputField(network_main_only, RID_field_main)
+        RIDslit_outfield = fm_RIDslit.outputField
+        RIDslit_outfield.name = 'RID_split'
+        fm_RIDslit.outputField = RIDslit_outfield
+        RIDunsplit_outfield = fm_RIDunsplit.outputField
+        RIDunsplit_outfield.name = RID_field_main
+        fm_RIDunsplit.outputField = RIDunsplit_outfield
+        fms.addFieldMap(fm_RIDunsplit)
+        fms.addFieldMap(fm_RIDslit)
+        arcpy.analysis.SpatialJoin("network_lyr", network_main_only, splitted_spatialjoin,
+                                   field_mapping=fms, match_option="WITHIN")
+        arcpy.AddJoin_management("network_lyr", RID_field, splitted_spatialjoin, "RID_split")
+        network_allchannels = RiverNetwork()
+        network_allchannels.dict_attr_fields['id'] = arcpy.Describe(network_shp).basename + "." + RID_field
+        network_allchannels.dict_attr_fields['main'] =  arcpy.Describe(network_shp).basename + "." + main_channel_field
+        network_allchannels.dict_attr_fields['main_RID'] =  arcpy.Describe(splitted_spatialjoin).basename + "." + RID_field_main
+        network_allchannels.load_data("network_lyr", routes_links, load_secondary_channel=True)
 
 
+        i = 0
+        list_tables = []
+        arcpy.MakeFeatureLayer_management(network_shp, "network_lyr")
+        arcpy.SelectLayerByAttribute_management("network_lyr", "NEW_SELECTION",
+                                                main_channel_field + " = 0")
+
+        arcpy.MakeFeatureLayer_management(network_main_only, "selected_reach")
+        for row in arcpy.da.SearchCursor("network_lyr", [RID_field]):
+            i += 1
+            currentreach = network_allchannels.get_reach(row[0])
+            downstream_mainreach = None
+            # Follow downstream
+            temp_reach = currentreach
+            while not temp_reach.is_downstream_end():
+                temp_reach = temp_reach.get_downstream_reach()
+                if temp_reach.main == 1:
+                    downstream_mainreach = temp_reach
+                    break
+            if downstream_mainreach is None:
+                raise IndexError("Secondary channel " + str(currentreach.id) + " does not reach any main channel downstream.")
+            # Project all points of the secondary channel on the identified main channel
+            arcpy.SelectLayerByAttribute_management("width_second_lyr", "NEW_SELECTION",
+                                                    arcpy.Describe(network_shp).basename + "." + RID_field + " = " + str(currentreach.id))
+            arcpy.SelectLayerByAttribute_management("selected_reach", "NEW_SELECTION",
+                                                    RID_field_main + " = " + str(downstream_mainreach.main_RID))
+            table = gc.CreateScratchName("net" + str(i), data_type="ArcInfoTable", workspace="in_memory")
+            arcpy.lr.LocateFeaturesAlongRoutes("width_second_lyr", "selected_reach", RID_field_main, search_distance, table,
+                                               RID_field_main + " POINT MEAS", distance_field="NO_DISTANCE")
+
+            list_tables.append(table)
+
+
+        arcpy.Merge_management(list_tables, secondary_width_pts)
 
         ### 2b - Interpolate width data for every secondary channel (with 0 upstream and downstream of the secondary channel)
         ### 3 - Sum all width measurements
         secondary_channel_RID_field = [f.name for f in arcpy.ListFields(secondary_width_pts)][
-            [f.name for f in arcpy.ListFields("width_main_lyr")].index(
+            [f.name for f in arcpy.ListFields("width_second_lyr")].index(
                 arcpy.Describe(widthdata).basename + "." + width_RID_field) + 1]
         secondary_width_pts_np = arcpy.da.TableToNumPyArray(secondary_width_pts, [widthid, RID_field_main, "MEAS", width_field, secondary_channel_RID_field])
         secondary_RIDs = np.unique(secondary_width_pts_np[[secondary_channel_RID_field]])
@@ -835,6 +900,7 @@ def execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_ma
     finally:
         # Suppression des couches de données temporaires
         gc.CleanAllTempFiles()
+
 
 
 def splitted_to_unsplitted(splitted_net, splitted_RID_field, pts_lyr, pts_ID_field, pts_RID_field, pts_dist_field, width_field, unsplitted_net, unsplitted_RID_field, unslitted_l_field, outpts):
