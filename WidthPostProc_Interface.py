@@ -204,7 +204,8 @@ class WidthPostProc(object):
         id_field_datapts = parameters[15].valueAsText
         distance_field_datapts = parameters[16].valueAsText
         rid_field_datapts = parameters[17].valueAsText
+        output_table = parameters[18].valueAsText
 
-        execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, output_table, messages)
+        execute_WidthPostProc(network_shp, RID_field, main_channel_field, network_main_only, RID_field_main, network_main_l_field, order_field, routes_links, network_main_only_links, widthdata, widthid, width_RID_field, width_distance, width_field, datapoints, id_field_datapts, distance_field_datapts, rid_field_datapts, output_table, messages)
 
         return
