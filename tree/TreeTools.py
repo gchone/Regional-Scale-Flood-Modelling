@@ -369,6 +369,14 @@ def execute_CreateTreeFromShapefile(rivernet, route_shapefile, routelinks_table,
 
     try:
 
+        # First, check that the input data is properly dissolved
+        nb_lines = int(arcpy.GetCount_management(rivernet)[0])
+        dissolved = gc.CreateScratchName("net", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
+        arcpy.management.Dissolve(nb_lines, dissolved, multi_part="SINGLE_PART")
+        nb_lines_d = int(arcpy.GetCount_management(dissolved)[0])
+        gc.CleanTempFile(dissolved)
+        if nb_lines != nb_lines_d:
+            messages.addWarningMessage("WARNING: The input river network is not properly dissolved.")
 
 
         # Create Junction points: two points created by reach, at both end of the line
