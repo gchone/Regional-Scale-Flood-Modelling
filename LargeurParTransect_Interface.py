@@ -94,10 +94,12 @@ class LargeurParTransect(object):
         return True
 
     def updateParameters(self, parameters):
-
         return
 
     def updateMessages(self, parameters):
+        parameters[7].clearMessage()
+        if arcpy.Describe(arcpy.env.workspace) != 'FileGDB':
+            parameters[7].setErrorMessage('Tool needs a File Geodatabase as workspace to run properly.')
         return
 
     def execute(self, parameters, messages):
