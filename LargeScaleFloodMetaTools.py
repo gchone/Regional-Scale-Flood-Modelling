@@ -536,16 +536,19 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
     targetcollection.save_points(temp_outtable)
     arcpy.MakeRouteEventLayer_lr(routes_D8, RID_field_D8, temp_outtable, RID_field_D8 + " POINT dist", "D8pts_lyr")
     original_fields = [f.name for f in arcpy.Describe(temp_outtable).fields]
-    relatetable_fields = [f.name for f in arcpy.Describe(relatetable).fields]
-    arcpy.management.AddJoin("D8pts_lyr", RID_field_D8, relatetable, relatetable_fields[2])
-    arcpy.CopyFeatures_management("D8pts_lyr", output_points)
-    aftercopy_fields = [f.name for f in arcpy.Describe(output_points).fields]
-    # Clean field names
-    for i, field in enumerate(original_fields):
-        if i>0: # keep the first OID field name
-            arcpy.AlterField_management(output_points, aftercopy_fields[i+1], field, field) # +1 because of the Shape field
-    arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+3], "RID_D8", "RID_D8")
-    arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+2], "RID_routesmain", "RID_routesmain")
+    if relatetable is not None:
+        relatetable_fields = [f.name for f in arcpy.Describe(relatetable).fields]
+        arcpy.management.AddJoin("D8pts_lyr", RID_field_D8, relatetable, relatetable_fields[2])
+        arcpy.CopyFeatures_management("D8pts_lyr", output_points)
+        aftercopy_fields = [f.name for f in arcpy.Describe(output_points).fields]
+        # Clean field names
+        for i, field in enumerate(original_fields):
+            if i>0: # keep the first OID field name
+                arcpy.AlterField_management(output_points, aftercopy_fields[i+1], field, field) # +1 because of the Shape field
+        arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+3], "RID_D8", "RID_D8")
+        arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+2], "RID_routesmain", "RID_routesmain")
+    else:
+        arcpy.CopyFeatures_management("D8pts_lyr", output_points)
 
 def execute_LisfloodDataConversion(
     lidar10m_fd, lidar10m_fill, from_pts, workspace,
