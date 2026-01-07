@@ -580,13 +580,14 @@ def execute_LisfloodDataConversion(
 
     # Step 4: Join D4fd_net_relatetable to routesD4, then join routes_main to routesD4
     routesD4_lyr = arcpy.MakeFeatureLayer_management(routesD4, "routesD4_lyr")
+
     relatetable_field = [f.name for f in arcpy.Describe(D4fd_net_relatetable).fields]
     arcpy.management.AddJoin("routesD4_lyr", routes_RID_field, D4fd_net_relatetable, relatetable_field[2])
-    routesD4_mainRID = arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[2]
+    routesD4_mainRID = arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[1]
     arcpy.management.AddJoin("routesD4_lyr", routesD4_mainRID, routes_main, routes_RID_field)
 
     # Step 5: Copy Qorder values
-    arcpy.management.CalculateField("routesD4_lyr", routes_QOrder_field, '!'+ arcpy.Describe(routes_main).basename + "." + routes_RID_field +'!', 'PYTHON3')
+    arcpy.management.CalculateField("routesD4_lyr", routes_QOrder_field, '!'+ arcpy.Describe(routes_main).basename + "." + routes_QOrder_field +'!', 'PYTHON3')
 
     # Step 6: Bed elevation workflow
     messages.addMessage('Processing bathymetry...')
