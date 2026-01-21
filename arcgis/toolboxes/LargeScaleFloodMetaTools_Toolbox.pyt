@@ -1,7 +1,18 @@
 # -*- coding: utf-8 -*-
 
-import arcpy
+import os
+import sys
 
+toolbox_dir = os.path.dirname(__file__)
+arcgis_dir = os.path.abspath(os.path.join(toolbox_dir, ".."))
+repo_root = os.path.abspath(os.path.join(arcgis_dir, ".."))
+scripts_dir = os.path.join(arcgis_dir, "scripts")
+
+for p in (scripts_dir, repo_root):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+import arcpy
 
 from OrderReaches_Interface import *
 from ExtractWaterSurface_Interface import *
