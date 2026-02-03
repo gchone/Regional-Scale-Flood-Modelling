@@ -97,9 +97,9 @@ class BatchProcessAggregate_QGIS(QgsProcessingAlgorithm):
     def processAlgorithm(self, parameters, context, feedback):
 
         # Notify user that some GRASS warnings are expected and non-fatal
-        feedback.pushInfo(
-            "Running GRASS r.resamp.stats in batch mode.\n"
-            "Some GRASS warnings may appear in the log on Windows but do not affect results."
+        feedback.reportError(
+            "Note: Non-fatal GRASS warnings may appear on Windows; outputs are still valid.",
+            fatalError=False
         )
 
         # Read and validate user inputs
@@ -123,12 +123,7 @@ class BatchProcessAggregate_QGIS(QgsProcessingAlgorithm):
 
         # Compute aggregated cell size from reference raster resolution
         cellsize = ref.rasterUnitsPerPixelX() * factor
-        cellsize_og = ref.rasterUnitsPerPixelX()
-
-        # Compute snapped region extent using union of all rasters if expand=True
-        if expand:
-            union = union_extent(rasters)
-            region = snapped_extent(union, cellsize_og, True)
+        snap_ref = None
 
         # Batch processing loop
         total = len(rasters)
@@ -137,44 +132,17 @@ class BatchProcessAggregate_QGIS(QgsProcessingAlgorithm):
             if feedback.isCanceled():
                 break
 
-            # Input raster path
+            # Input raster path and output
             src = lyr.source()
-
-            # Output file name (same base name + suffix)
+            src_extent = lyr.extent()
             base = os.path.splitext(os.path.basename(src))[0]
             out_path = os.path.join(out_dir, f"{base}_agg.tif")
 
             feedback.pushInfo(f"Aggregating raster {i+1}/{total}: {base}")
 
-            # Use current raster as-is unless expand=True
-            src_for_grass = src
-
-            if expand:
-                # Warp tile to a common grid so all rasters share identical pixel alignment
-                tmp_aligned = os.path.join(tempfile.gettempdir(), f"{base}_aligned_{os.getpid()}_{i + 1}.tif")
-
-                alg_params = {
-                    "INPUT": src,
-                    "TARGET_EXTENT": f"{region.xMinimum()},{region.xMaximum()},{region.yMinimum()},{region.yMaximum()}",
-                    "TARGET_EXTENT_CRS": ref.crs(),
-                    "TARGET_RESOLUTION": cellsize_og,
-                    "TARGET_ALIGNED_PIXELS": True,
-                    "RESAMPLING": 0,  # nearest
-                    "OUTPUT": tmp_aligned
-                }
-                processing.run(
-                    "gdal:warpreproject",
-                    alg_params,
-                    context=context,
-                    feedback=None,
-                    is_child_algorithm=True
-                )
-
-                src_for_grass = tmp_aligned
-
             # Aggregate rasters using GRASS r.resamp.stats
             alg_params = {
-                "input": src_for_grass,
+                "input": src,
                 "method": tech_idx,
                 "output": out_path,
                 "-n": propagate_nulls,
@@ -182,13 +150,40 @@ class BatchProcessAggregate_QGIS(QgsProcessingAlgorithm):
                 "GRASS_RASTER_FORMAT_OPT": "",
                 "GRASS_RASTER_FORMAT_META": ""
             }
-            processing.run(
-                "grass7:r.resamp.stats",
-                alg_params,
-                context=context,
-                feedback=None,
-                is_child_algorithm=True
-            )
+
+            if i == 0:
+                region = snapped_extent(src_extent, cellsize, expand)
+                alg_params.update({
+                    "GRASS_REGION_EXTENT_PARAMETER": region
+                })
+
+                processing.run(
+                    "grass7:r.resamp.stats",
+                    alg_params,
+                    context=context,
+                    feedback=None,
+                    is_child_algorithm=True
+                )
+
+                # Set snap reference ONCE
+                snap_ref = QgsRasterLayer(out_path, "snap_ref")
+                if not snap_ref.isValid():
+                    raise QgsProcessingException("Failed to create snap reference raster")
+
+
+            else:
+                region = snapped_extent_to_snap(src_extent, snap_ref, cellsize, expand)
+                alg_params.update({
+                    "GRASS_REGION_EXTENT_PARAMETER": region
+                })
+
+                processing.run(
+                    "grass7:r.resamp.stats",
+                    alg_params,
+                    context=context,
+                    feedback=None,
+                    is_child_algorithm=True
+                )
 
             # Update progress bar
             feedback.pushInfo(f"Finished {i+1}/{total}: {base} → {out_path}")
@@ -233,23 +228,7 @@ class BatchProcessAggregate_QGIS(QgsProcessingAlgorithm):
             "LISFLOOD and subsequent flood-modelling steps."
         )
 
-
 # Helper functions
-def union_extent(rasters):
-    # Compute the bounding union extent of all input rasters
-    xmin = ymin = xmax = ymax = None
-    for r in rasters:
-        e = r.extent()
-        if xmin is None:
-            xmin, ymin, xmax, ymax = e.xMinimum(), e.yMinimum(), e.xMaximum(), e.yMaximum()
-        else:
-            xmin = min(xmin, e.xMinimum())
-            ymin = min(ymin, e.yMinimum())
-            xmax = max(xmax, e.xMaximum())
-            ymax = max(ymax, e.yMaximum())
-    return QgsRectangle(xmin, ymin, xmax, ymax)
-
-
 def snapped_extent(ext: QgsRectangle, cellsize: float, expand: bool) -> QgsRectangle:
     # Snap an extent to the target grid, optionally expanding to fit full cells
     xmin, ymin = ext.xMinimum(), ext.yMinimum()
@@ -267,7 +246,33 @@ def snapped_extent(ext: QgsRectangle, cellsize: float, expand: bool) -> QgsRecta
         ncols = max(math.floor(width / cellsize), 1)
         nrows = max(math.floor(height / cellsize), 1)
 
-    snapped_xmax = xmin + ncols * cellsize
-    snapped_ymax = ymin + nrows * cellsize
+    return QgsRectangle(xmin, ymin, xmin + ncols * cellsize, ymin + nrows * cellsize)
 
-    return QgsRectangle(xmin, ymin, snapped_xmax, snapped_ymax)
+def snapped_extent_to_snap(ext: QgsRectangle, snap: QgsRasterLayer, cellsize: float, expand: bool) -> QgsRectangle:
+    # Snap extent to the grid defined by the snap raster
+    xmin, ymin = ext.xMinimum(), ext.yMinimum()
+    xmax, ymax = ext.xMaximum(), ext.yMaximum()
+
+    x0 = snap.extent().xMinimum()
+    y0 = snap.extent().yMinimum()
+
+    def snap_min(v, v0):
+        t = (v - v0) / cellsize
+        return v0 + (math.floor(t) if expand else math.ceil(t)) * cellsize
+
+    def snap_max(v, v0):
+        t = (v - v0) / cellsize
+        return v0 + (math.ceil(t) if expand else math.floor(t)) * cellsize
+
+    sxmin = snap_min(xmin, x0)
+    symin = snap_min(ymin, y0)
+    sxmax = snap_max(xmax, x0)
+    symax = snap_max(ymax, y0)
+
+    # Safety guard
+    if sxmax <= sxmin:
+        sxmax = sxmin + cellsize
+    if symax <= symin:
+        symax = symin + cellsize
+
+    return QgsRectangle(sxmin, symin, sxmax, symax)
