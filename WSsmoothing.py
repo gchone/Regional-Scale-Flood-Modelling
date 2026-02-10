@@ -11,6 +11,11 @@ from scipy.stats import norm
 from scipy.optimize import minimize_scalar
 import math
 import warnings
+from rdp import rdp
+import numpy as np
+from scipy.interpolate import interp1d
+
+
 
 def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, uncertaintyfactor, slopesigma, slopefactor):
 
@@ -130,11 +135,69 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
     return
 
 
-def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True):
+def rdp_simplify_and_resample(listcs, epsilon=1.0):
+    """
+    Simplify the cross-section list using Ramer-Douglas-Peucker algorithm,
+    then resample back to the original number of points using linear interpolation.
+
+    Parameters:
+        listcs: List of cross-section objects
+        epsilon: Tolerance for RDP algorithm (in elevation units)
+
+    Returns:
+        Modified listcs with resampled zws_quantilecarving values
+    """
+    # Extract distances and elevation values
+    reachdist = 0
+    distances = []
+    values = []
+    lastreach = None
+
+    for cs in listcs:
+        if lastreach is not None and cs.reach != lastreach:
+            reachdist += lastreach.length
+        distances.append(cs.dist + reachdist)
+        values.append(cs.zws_quantilecarving)
+        lastreach = cs.reach
+
+    distances = np.array(distances)
+    values = np.array(values)
+
+    # Create points for RDP: [[x1, y1], [x2, y2], ...]
+    points = np.column_stack((distances, values))
+
+    # Apply RDP simplification
+    simplified_points = rdp(points, epsilon=epsilon)
+
+    # Extract simplified distances and values
+    simplified_distances = simplified_points[:, 0]
+    simplified_values = simplified_points[:, 1]
+
+    # Create interpolation function from simplified points
+    if len(simplified_distances) > 1:
+        interp_func = interp1d(simplified_distances, simplified_values,
+                               kind='linear', bounds_error=False,
+                               fill_value='extrapolate')
+
+        # Resample to original distances
+        resampled_values = interp_func(distances)
+    else:
+        # If only one point remains, use its value for all
+        resampled_values = np.full_like(values, simplified_values[0])
+
+    # Update the zws_quantilecarving values in the cross-section objects
+    for i, cs in enumerate(listcs):
+        cs.zws_quantilecarving = resampled_values[i]
+
+    return listcs
+
+
+def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True, rdp_epsilon=0.03):
 
     # The process:
     # - Removes bumps in the water surface profile following the quantile carving process of
     #   Schwanghart and Scherler (2017). See QuantileRegression.py for details.
+    # - Simplifies the profile using Ramer-Douglas-Peucker algorithm, then resamples to original resolution
     # - Smooths the river profile. Smoothing is done with a Gaussian moving average, where the amount of smoothing (i.e.
     # the standard deviation of the gaussian curve), is parametered by the amount of correction done during the quantile
     # carving process and the local slope.
@@ -171,6 +234,9 @@ def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datap
             # Stop when there is a DEM change or when we reach the last cs upstream
             if prev_DEM_ID is not None and prev_DEM_ID != cs.DEM_ID:
                 QuantileCarving(list_cs, prevcs_list, messages, tau=quantile)
+                # Apply RDP simplification and resampling
+                if rdp_epsilon is not None:
+                    rdp_simplify_and_resample(list_cs, epsilon=rdp_epsilon)
                 if smoothing:
                     Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
                 list_cs = []
@@ -181,6 +247,9 @@ def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datap
 
             if isendreach and cs==endnode:
                 QuantileCarving(list_cs, prevcs_list, messages, tau=quantile)
+                # Apply RDP simplification and resampling
+                if rdp_epsilon is not None:
+                    rdp_simplify_and_resample(list_cs, epsilon=rdp_epsilon)
                 if smoothing:
                     Gaussian_weighted_moving_average(list_cs, prevcs_list, smooth_level, uncertainty_sigma, uncertainty_factor, slope_sigma, slope_factor)
                 list_cs = []
