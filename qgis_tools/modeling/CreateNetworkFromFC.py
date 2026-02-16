@@ -11,6 +11,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QVariant, QMetaType
 
+# Add qgis_tools root to path so Processing script can import tree_qgis package (TreeTools)
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from tree_qgis.TreeTools import create_network_from_fc
@@ -120,6 +121,7 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
         if rivernet is None:
             raise QgsProcessingException("Input network layer is invalid")
 
+        # Build topology, getting corrected (possibly flipped) features & DownRID-UpRID link table rows
         out_features, links_rows = create_network_from_fc(
             rivernet=rivernet,
             rid_field=rid_field,
@@ -142,6 +144,7 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
                 break
             network_sink.addFeature(f, QgsFeatureSink.FastInsert)
 
+        # Create output table for DownRID-UpRID relationships
         link_fields = QgsFields()
         link_fields.append(QgsField("DownRID", QMetaType.LongLong))
         link_fields.append(QgsField("UpRID", QMetaType.LongLong))
