@@ -13,7 +13,7 @@ from qgis.PyQt.QtCore import QVariant, QMetaType
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from tree_QGIS.TreeTools import create_network_from_fc
+from tree_qgis.TreeTools import create_network_from_fc
 
 class CreateNetworkFromFC(QgsProcessingAlgorithm):
     RIVNET = "RIVNET"
