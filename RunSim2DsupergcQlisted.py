@@ -156,6 +156,15 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             if os.path.isfile(destinationbci):
                                 os.remove(destinationbci)
                             shutil.copy(sourcebci, destinationbci)
+
+                            # Remove all downstream boundary conditions in the bci file (lines that do not start with 'P')
+                            with open(destinationbci, 'r') as f:
+                                lines = f.readlines()
+                            with open(destinationbci, 'w') as f:
+                                for line in lines:
+                                    if line.strip() and line[0] == 'P':
+                                        f.write(line)
+
                             filebci = open(destinationbci, 'a')
 
 
@@ -647,4 +656,3 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                         messages.addWarningMessage("Some simulations skipped. See log file.")
                         skipsim = True
     return
-
