@@ -146,8 +146,8 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
 
         # Create output table for DownRID-UpRID relationships
         link_fields = QgsFields()
-        link_fields.append(QgsField("DownRID", QMetaType.LongLong))
-        link_fields.append(QgsField("UpRID", QMetaType.LongLong))
+        link_fields.append(QgsField("DownID", QMetaType.LongLong))
+        link_fields.append(QgsField("UpID", QMetaType.LongLong))
 
         (links_sink, links_id) = self.parameterAsSink(
             parameters,
