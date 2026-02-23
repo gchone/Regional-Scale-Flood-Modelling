@@ -13,10 +13,111 @@ import arcpy
 import subprocess
 import shutil
 import csv
+import math
+from datetime import datetime
 from RasterIO import *
 
 class pointflowpath:
    pass
+
+def log_message(filelog, level, message):
+    """
+    Write formatted log messages with timestamp.
+
+    Parameters:
+        filelog: Log file handle
+        level: Message level ('INFO', 'WARNING', 'ERROR')
+        message: Message text
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted_msg = f"[{timestamp}] [{level}] {message}\n"
+    filelog.write(formatted_msg)
+    filelog.flush()
+
+def check_mass_file(mass_file_path, lastdischarge, zonename, filelog, messages, tolerance=0.05):
+    """
+    Check the mass file to verify that Qin and Qout are similar and match lastdischarge.
+
+    Parameters:
+        mass_file_path: Path to the .mass file
+        lastdischarge: The expected discharge value
+        zonename: Zone name for logging
+        filelog: Log file handle
+        messages: ArcGIS messages object
+        tolerance: Tolerance for comparison (default 5%)
+
+    Returns:
+        Boolean indicating if all checks passed
+    """
+    try:
+        if not os.path.exists(mass_file_path):
+            log_message(filelog, "WARNING", f"Mass file not found for {zonename}: {mass_file_path}")
+            messages.addWarningMessage(f"[Mass Balance] Mass file not found for {zonename}: {mass_file_path}")
+            return False
+
+        # Read the mass file and extract the last line (final state)
+        try:
+            with open(mass_file_path, 'r') as f:
+                lines = f.readlines()
+        except IOError as e:
+            log_message(filelog, "ERROR", f"Cannot read mass file for {zonename}: {str(e)}")
+            messages.addErrorMessage(f"[Mass Balance] Cannot read mass file for {zonename}: {str(e)}")
+            return False
+
+        # Skip header and empty lines, get the last data line
+        data_lines = [line for line in lines if line.strip() and not line.startswith('Time')]
+        if not data_lines:
+            log_message(filelog, "WARNING", f"No data found in mass file for {zonename}")
+            messages.addWarningMessage(f"[Mass Balance] No data found in mass file for {zonename}")
+            return False
+
+        last_line = data_lines[-1].split()
+
+        # Extract Qin and Qout (columns 7 and 9, 0-indexed: Time, Tstep, MinTstep, NumTsteps, Area, Vol, Qin, Hds, Qout)
+        try:
+            qin = float(last_line[6])   # Qin column (index 6)
+            qout = float(last_line[8])  # Qout column (index 8)
+        except (ValueError, IndexError) as e:
+            log_message(filelog, "ERROR", f"Cannot parse Qin/Qout from mass file for {zonename}. Expected at least 9 columns. Error: {str(e)}")
+            messages.addErrorMessage(f"[Mass Balance] Cannot parse Qin/Qout from mass file for {zonename}")
+            return False
+
+        all_checks_passed = True
+
+        # Check 1: Qin and Qout are similar (within 5% tolerance)
+        if qin != 0:
+            qin_qout_diff = abs(qout - qin) / abs(qin)
+        else:
+            qin_qout_diff = abs(qout - qin)
+
+        if qin_qout_diff > tolerance:
+            all_checks_passed = False
+            diff_pct = qin_qout_diff * 100
+            msg = f"Qin and Qout mismatch for {zonename}: Qin={qin:.3f} m³/s, Qout={qout:.3f} m³/s, Difference={diff_pct:.2f}% (tolerance={tolerance*100:.1f}%)"
+            log_message(filelog, "WARNING", msg)
+            messages.addWarningMessage(f"[Mass Balance] {msg}")
+
+        # Check 2: Qin match lastdischarge (within 5% tolerance)
+        if lastdischarge != 0:
+            qin_discharge_diff = abs(qin - lastdischarge) / abs(lastdischarge)
+            qout_discharge_diff = abs(qout - lastdischarge) / abs(lastdischarge)
+        else:
+            qin_discharge_diff = abs(qin - lastdischarge)
+            qout_discharge_diff = abs(qout - lastdischarge)
+
+        if qin_discharge_diff > tolerance:
+            all_checks_passed = False
+            diff_pct = qin_discharge_diff * 100
+            msg = f"Qin does not match inbci discharge for {zonename}: Qin={qin:.3f} m³/s, inbci discharge={lastdischarge:.3f} m³/s, Difference={diff_pct:.2f}% (tolerance={tolerance*100:.1f}%)"
+            log_message(filelog, "WARNING", msg)
+            messages.addWarningMessage(f"[Mass Balance] {msg}")
+
+        return all_checks_passed
+
+    except Exception as e:
+        log_message(filelog, "ERROR", f"Unexpected exception in check_mass_file for {zonename}: {type(e).__name__}: {str(e)}")
+        messages.addErrorMessage(f"[Mass Balance] Unexpected error for {zonename}: {str(e)}")
+        return False
 
 def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_lakes, list_fields_z, voutput, simtime, cfl, channelmanning, r_zbed, list_fieldQ_inbci, str_log, messages):
 
@@ -112,6 +213,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
         currentresult = str_simfolder + "\\res_" + simname + ".tif"
 
         skipsim = False # Used when a simulation produced no output
+        filelog.write(f"Starting simulations with discharge field: {simname}\n")
 
         if not os.path.isdir(currentsimfolder):
             os.makedirs(currentsimfolder)
@@ -140,6 +242,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             else:
                                 if not os.path.exists(currentresult):
                                     messages.addErrorMessage("Downsteam boudary condition not found: tile #" + str(point[1]))
+                                    filelog.write("ERROR: Downsteam boudary condition not found: tile #" + str(point[1]) + "\n")
                                 else:
                                     # issue with Mosaic_management, used later with lisflood_res:
                                     # crash sometimes if the file is read here
@@ -481,6 +584,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                     distance += distinc
                                     currentrow += rowinc
                                     currentcol += colinc
+
                                     if newpoint.side2 == "W" or newpoint.side2 == "E":
                                         newpoint.lim4 = ref_raster.RowtoY(currentrow)
                                     else:
@@ -578,81 +682,167 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
 
                             # Defining the -steadytol parameter of LISFLOOD-FP
                             # Hardcoded as 1/200th of the discharge
-                            steadytol = str(
-                                round(lastdischarge / 200., - int(math.floor(math.log10(abs(lastdischarge / 200.))))))
+                            try:
+                                steadytol = str(
+                                    round(lastdischarge / 200., - int(math.floor(math.log10(abs(lastdischarge / 200.))))))
+                            except (ValueError, ZeroDivisionError) as e:
+                                log_message(filelog, "ERROR", f"Cannot calculate steadytol for zone {point[1]}, sim {simname}: {str(e)}")
+                                messages.addErrorMessage(f"[LISFLOOD] Cannot calculate steadytol for zone {point[1]}")
+                                skipsim = True
+                                continue
 
                             # Running LISFLOOD-FP
-                            subprocess.check_call([str_lisfloodfolder + "\\lisflood.exe", "-steady", "-steadytol", steadytol, str_simfolder + "\\zone" + str(point[1]) + ".par"], shell=True, cwd=str_simfolder)
+                            log_message(filelog, "INFO", f"Starting LISFLOOD-FP simulation for zone {point[1]}, sim {simname} (steadytol={steadytol})")
+                            try:
+                                result = subprocess.run(
+                                    [str_lisfloodfolder + "\\lisflood.exe", "-steady", "-steadytol", steadytol,
+                                     str_simfolder + "\\zone" + str(point[1]) + ".par"],
+                                    shell=True, cwd=str_simfolder, capture_output=True, text=True, timeout=3600
+                                )
+                                if result.returncode != 0:
+                                    log_message(filelog, "ERROR", f"LISFLOOD-FP failed for zone {point[1]}, sim {simname}. Return code: {result.returncode}")
+                                    if result.stderr:
+                                        log_message(filelog, "ERROR", f"LISFLOOD stderr: {result.stderr[:500]}")
+                                    messages.addErrorMessage(f"[LISFLOOD] LISFLOOD-FP simulation failed for zone {point[1]}")
+                                    skipsim = True
+                                    continue
+                            except subprocess.TimeoutExpired:
+                                log_message(filelog, "ERROR", f"LISFLOOD-FP timeout for zone {point[1]}, sim {simname} (> 1 hour)")
+                                messages.addErrorMessage(f"[LISFLOOD] LISFLOOD-FP timeout for zone {point[1]}")
+                                skipsim = True
+                                continue
+                            except Exception as e:
+                                log_message(filelog, "ERROR", f"LISFLOOD-FP execution error for zone {point[1]}, sim {simname}: {type(e).__name__}: {str(e)}")
+                                messages.addErrorMessage(f"[LISFLOOD] LISFLOOD-FP execution error for zone {point[1]}: {str(e)}")
+                                skipsim = True
+                                continue
+
                             progres += 1
                             arcpy.SetProgressorPosition(progres)
+                            log_message(filelog, "INFO", f"✓ LISFLOOD-FP simulation completed for zone {point[1]}, sim {simname}")
+
+                            zonename = "zone" + str(point[1])
+
+                            # Validate mass balance
+                            try:
+                                mass_file_path = currentsimfolder + "\\"  + zonename + ".mass"
+                                check_mass_file(mass_file_path, lastdischarge, zonename, filelog, messages)
+                            except Exception as e:
+                                log_message(filelog, "ERROR", f"Exception during mass balance validation for {zonename}: {type(e).__name__}: {str(e)}")
+                                messages.addErrorMessage(f"[Mass Balance] Exception during validation for {zonename}: {str(e)}")
 
                             if arcpy.Exists(currentsimfolder + "\\tmp_zone" + str(point[1])):
                                 arcpy.Delete_management(currentsimfolder + "\\tmp_zone" + str(point[1]))
 
                             # Converting output files
-                            zonename = "zone"+str(point[1])
+                            try:
+                                if os.path.exists(currentsimfolder + "\\"  + zonename + "elev.txt"):
+                                    os.remove(currentsimfolder + "\\"   + zonename + "elev.txt")
 
-                            if os.path.exists(currentsimfolder + "\\"  + zonename + "elev.txt"):
-                                os.remove(currentsimfolder + "\\"   + zonename + "elev.txt")
-
-                            if os.path.exists(currentsimfolder   + "\\" + zonename + "-9999.elev"):
-                                os.rename(currentsimfolder  + "\\"  + zonename + "-9999.elev",
-                                          currentsimfolder + "\\" + zonename + "elev.txt")
-                            else:
-                                os.rename(currentsimfolder  + "\\" + zonename + "-0001.elev",
-                                          currentsimfolder + "\\" + zonename + "elev.txt")
-                                filelog.write("Steady state not reached : " + zonename + ", sim " + simname+ "\n")
-                                messages.addWarningMessage("Steady state not reached : " + zonename + ", sim " + simname)
-
-                            if os.path.exists(currentsimfolder + "\\" + zonename + "-9999.Vx") or os.path.exists(currentsimfolder + "\\"  + zonename + "-0001.Vx"):
-                                if os.path.exists(currentsimfolder + "\\" + zonename + "Vx.txt"):
-                                    os.remove(currentsimfolder + "\\" + zonename + "Vx.txt")
-
-                                if os.path.exists(currentsimfolder + "\\" + zonename + "Vy.txt"):
-                                    os.remove(currentsimfolder + "\\" + zonename + "Vy.txt")
-                                if os.path.exists(currentsimfolder  + "\\" + zonename + "-9999.Vx"):
-                                    os.rename(currentsimfolder  + "\\" + zonename + "-9999.Vx",
-                                              currentsimfolder+ "\\" + zonename + "Vx.txt")
-                                    os.rename(currentsimfolder  + "\\"  + zonename + "-9999.Vy",
-                                              currentsimfolder  + "\\" + zonename + "Vy.txt")
+                                elev_file_found = False
+                                if os.path.exists(currentsimfolder + "\\" + zonename + "-9999.elev"):
+                                    os.rename(currentsimfolder + "\\" + zonename + "-9999.elev",
+                                              currentsimfolder + "\\" + zonename + "elev.txt")
+                                    elev_file_found = True
+                                elif os.path.exists(currentsimfolder + "\\" + zonename + "-0001.elev"):
+                                    os.rename(currentsimfolder + "\\" + zonename + "-0001.elev",
+                                              currentsimfolder + "\\" + zonename + "elev.txt")
+                                    elev_file_found = True
+                                    log_message(filelog, "WARNING", f"Steady state not reached for {zonename}, sim {simname} (using -0001.elev)")
+                                    messages.addWarningMessage(f"[Simulation] Steady state not reached for {zonename}, sim {simname}")
                                 else:
-                                    os.rename(currentsimfolder  + "\\" + zonename + "-0001.Vx",
-                                              currentsimfolder  + "\\" + zonename + "Vx.txt")
-                                    os.rename(currentsimfolder  + "\\" + zonename + "-0001.Vy",
-                                              currentsimfolder  + "\\" + zonename + "Vy.txt")
-                                arcpy.ASCIIToRaster_conversion(currentsimfolder  + "\\" + zonename + "Vx.txt",
-                                                               currentsimfolder + "\\Vx_" + zonename + ".tif",
-                                                           "FLOAT")
-                                arcpy.ASCIIToRaster_conversion(currentsimfolder  + "\\" + zonename + "Vy.txt",
-                                                               currentsimfolder + "\\Vy_" + zonename + ".tif",
-                                                           "FLOAT")
-                                arcpy.DefineProjection_management(currentsimfolder + "\\Vx_" + zonename + ".tif", ref_raster.raster.spatialReference)
-                                arcpy.DefineProjection_management(currentsimfolder + "\\Vy_" + zonename + ".tif", ref_raster.raster.spatialReference)
+                                    log_message(filelog, "ERROR", f"No elevation output file found for {zonename}")
+                                    messages.addErrorMessage(f"[Output] No elevation output file found for {zonename}")
+                                    skipsim = True
+                                    continue
 
+                                # Convert velocity files if available
+                                if os.path.exists(currentsimfolder + "\\" + zonename + "-9999.Vx") or os.path.exists(currentsimfolder + "\\" + zonename + "-0001.Vx"):
+                                    if os.path.exists(currentsimfolder + "\\" + zonename + "Vx.txt"):
+                                        os.remove(currentsimfolder + "\\" + zonename + "Vx.txt")
+                                    if os.path.exists(currentsimfolder + "\\" + zonename + "Vy.txt"):
+                                        os.remove(currentsimfolder + "\\" + zonename + "Vy.txt")
 
-                            # Creating a raster for ArcGIS
-                            str_elev = currentsimfolder + "\\elev_" + zonename + ".tif"
-                            arcpy.ASCIIToRaster_conversion(currentsimfolder + "\\"  + zonename + "elev.txt", str_elev, "FLOAT")
-                            arcpy.DefineProjection_management(str_elev, ref_raster.raster.spatialReference)
+                                    if os.path.exists(currentsimfolder + "\\" + zonename + "-9999.Vx"):
+                                        os.rename(currentsimfolder + "\\" + zonename + "-9999.Vx",
+                                                  currentsimfolder + "\\" + zonename + "Vx.txt")
+                                        os.rename(currentsimfolder + "\\" + zonename + "-9999.Vy",
+                                                  currentsimfolder + "\\" + zonename + "Vy.txt")
+                                    else:
+                                        os.rename(currentsimfolder + "\\" + zonename + "-0001.Vx",
+                                                  currentsimfolder + "\\" + zonename + "Vx.txt")
+                                        os.rename(currentsimfolder + "\\" + zonename + "-0001.Vy",
+                                                  currentsimfolder + "\\" + zonename + "Vy.txt")
 
+                                    try:
+                                        arcpy.ASCIIToRaster_conversion(currentsimfolder + "\\" + zonename + "Vx.txt",
+                                                                       currentsimfolder + "\\Vx_" + zonename + ".tif",
+                                                                       "FLOAT")
+                                        arcpy.ASCIIToRaster_conversion(currentsimfolder + "\\" + zonename + "Vy.txt",
+                                                                       currentsimfolder + "\\Vy_" + zonename + ".tif",
+                                                                       "FLOAT")
+                                        arcpy.DefineProjection_management(currentsimfolder + "\\Vx_" + zonename + ".tif",
+                                                                          ref_raster.raster.spatialReference)
+                                        arcpy.DefineProjection_management(currentsimfolder + "\\Vy_" + zonename + ".tif",
+                                                                          ref_raster.raster.spatialReference)
+                                    except Exception as e:
+                                        log_message(filelog, "WARNING", f"Could not create velocity rasters for {zonename}: {str(e)}")
+                                        messages.addWarningMessage(f"[Output] Could not create velocity rasters for {zonename}")
 
+                                # Creating elevation raster for ArcGIS
+                                str_elev = currentsimfolder + "\\elev_" + zonename + ".tif"
+                                try:
+                                    arcpy.ASCIIToRaster_conversion(currentsimfolder + "\\" + zonename + "elev.txt", str_elev, "FLOAT")
+                                    arcpy.DefineProjection_management(str_elev, ref_raster.raster.spatialReference)
+                                except Exception as e:
+                                    log_message(filelog, "ERROR", f"Failed to create elevation raster for {zonename}: {str(e)}")
+                                    messages.addErrorMessage(f"[Output] Failed to create elevation raster for {zonename}: {str(e)}")
+                                    skipsim = True
+                                    continue
 
-                        if not arcpy.Exists(currentresult):
+                            except Exception as e:
+                                log_message(filelog, "ERROR", f"Error during output file conversion for {zonename}: {type(e).__name__}: {str(e)}")
+                                messages.addErrorMessage(f"[Output] Error during file conversion for {zonename}")
+                                skipsim = True
+                                continue
 
-                            arcpy.Copy_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult)
-                        else:
+                            # Raster processing and summary
+                            try:
+                                if not arcpy.Exists(currentresult):
+                                    try:
+                                        arcpy.Copy_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult)
+                                    except Exception as e:
+                                        log_message(filelog, "ERROR", f"Failed to create initial result raster for {currentresult}: {str(e)}")
+                                        messages.addErrorMessage(f"[Output] Failed to create result raster: {str(e)}")
+                                        skipsim = True
+                                else:
+                                    try:
+                                        arcpy.Mosaic_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult, mosaic_type="MAXIMUM")
+                                    except Exception as e:
+                                        log_message(filelog, "ERROR", f"Failed to mosaic elevation raster for zone {point[1]}: {str(e)}")
+                                        messages.addErrorMessage(f"[Output] Failed to mosaic raster for zone {point[1]}: {str(e)}")
+                                        skipsim = True
 
-                            arcpy.Mosaic_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult, mosaic_type="MAXIMUM")
-                            #arcpy.Copy_management(str_output + "\\lisflood_res", str_output + "\\tmp_mosaic")
-                            #arcpy.Delete_management(str_output + "\\lisflood_res")
-                            # arcpy.MosaicToNewRaster_management(';'.join([str_output + "\\tmp_mosaic", str_output + "\\elev_" + point[1]]),
-                            #                                    str_output,"lisflood_res",
-                            #                                    pixel_type="32_BIT_FLOAT",
-                            #                                    number_of_bands=1)
+                            except BaseException as e:
+                                error_type = type(e).__name__
+                                error_msg = f"CRITICAL ERROR in {simname}: simulation aborted during zone {point[1]}\nError Type: {error_type}\nError Message: {str(e)}"
+                                log_message(filelog, "ERROR", error_msg)
+                                filelog.write(repr(e) + "\n")
+                                filelog.write("=" * 80 + "\n")
+                                messages.addErrorMessage(f"[Critical] {error_msg}")
+                                messages.addWarningMessage("Some simulations skipped. See log file for details.")
+                                skipsim = True
 
-                    except BaseException as e:
-                        filelog.write("ERREUR in " + simname + ": sim aborded during zone "+ str(point[1]) + ", " + simname + ":\n")
-                        filelog.write(repr(e))
-                        messages.addWarningMessage("Some simulations skipped. See log file.")
-                        skipsim = True
+    # Summary and cleanup
+    log_message(filelog, "INFO", "=" * 80)
+    log_message(filelog, "INFO", "SIMULATION EXECUTION COMPLETED")
+    log_message(filelog, "INFO", "=" * 80)
+
+    try:
+        filelog.close()
+        log_file_size = os.path.getsize(str_log) / 1024  # Size in KB
+        print(f"Log file written: {str_log} ({log_file_size:.1f} KB)")
+    except Exception as e:
+        messages.addWarningMessage(f"Could not properly close log file: {str(e)}")
+
     return
