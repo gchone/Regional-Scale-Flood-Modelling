@@ -57,7 +57,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
         # Uncertainty is calculated from:
         # - the absolute value of the carving (how much carving is done)
         # - the difference between the elevation and surrounding elevations (how much slope there is).
-        # A exponential transformation is applyied to that 0 difference of elevation = 1. The slopfactor is added to put
+        # A exponential transformation is applied to that 0 difference of elevation = 1. The slopefactor is added to put
         # more or less weight on the slope.
         # - The ratio between the carving and the differences between the elevations gives a measure of the uncertainty
         # relative to the slope
@@ -66,51 +66,58 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
         if corrections < 1e-9:
             # If there is no carving, there are no smoothing to be made
             smoothed_values[i] = values[i]
+            sd2 = None
         else:
             weightsslope = norm.pdf(distances, loc=distances[i], scale=slopesigma)
             weightsslope /= weightsslope.sum()  # Normalize weights
             deltaz = math.exp(sum(np.abs(values[i] - values) * weightsslope)) ** slopefactor
             uncertainty = corrections / deltaz
             uncertainty_vec[i] = uncertainty
+
             if i > 0:
                 # In order to avoid the problem of the Gaussian curve being too wide, we need to make sure that the pdf of
                 # the gaussian curve is lower than the previous one (on the left side of the previous one). Otherwise the
                 # resulting elevation can be lower than the previous one, creating a non-hydraulically valid profile.
                 x_values = distances[0:i - 1]
                 mu1 = distances[i - 1]
-                sd1 = sd2  # sd1 is the previous sd2
-                sd2 = uncertainty * local_sigma
-                mu2 = distances[i]
-                F1 = norm.pdf(x_values, loc=mu1, scale=sd1)
-                F2 = norm.pdf(x_values, loc=mu2, scale=sd2)
-                validpdf = np.all(F1 >= F2)
-                if not validpdf:
-                    # The Gaussian curve is too wide, compared to the previous ones
-                    # We need to reduce the standard deviation of the Gaussian curve in that case.
-                    # We will use the optimization to find the maximum possible standard deviation
-                    restricted[i] = 1
+                if sd2 is not None:
+                    sd1 = sd2  # sd1 is the previous sd2
+                    sd2 = uncertainty * local_sigma
+                    mu2 = distances[i]
+                    F1 = norm.pdf(x_values, loc=mu1, scale=sd1)
+                    F2 = norm.pdf(x_values, loc=mu2, scale=sd2)
+                    validpdf = np.all(F1 >= F2)
+                    if not validpdf:
+                        # The Gaussian curve is too wide, compared to the previous ones
+                        # We need to reduce the standard deviation of the Gaussian curve in that case.
+                        # We will use optimization to find the maximum possible standard deviation
+                        restricted[i] = 1
 
-                    def objective(tested_sd2):
-                        """Objective function to minimize: we want the negative of sd2 for maximization"""
-                        F1 = norm.pdf(x_values, loc=mu1, scale=sd1)
-                        F2 = norm.pdf(x_values, loc=mu2, scale=tested_sd2)
-                        diff = F1 - F2
-                        if np.any(diff < 0):
-                            return np.inf  # violates the constraint
-                        return -tested_sd2  # maximize sd2
+                        def objective(tested_sd2):
+                            """Objective function to minimize: we want the negative of sd2 for maximization"""
+                            F1 = norm.pdf(x_values, loc=mu1, scale=sd1)
+                            F2 = norm.pdf(x_values, loc=mu2, scale=tested_sd2)
+                            diff = F1 - F2
+                            if np.any(diff < 0):
+                                return np.inf  # violates the constraint
+                            return -tested_sd2  # maximize sd2
 
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=RuntimeWarning)
-                        result = minimize_scalar(objective, bounds=(0.001, sd2), method='bounded')
-                        if result.success:
-                            sd2 = result.x
-                        else:
-                            # If optimization fails, the best guess is to use the previous sd
-                            sd2 = sd1
-                            restricted[i] = 2
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("ignore", category=RuntimeWarning)
+                            result = minimize_scalar(objective, bounds=(0.001, sd2), method='bounded')
+                            if result.success:
+                                sd2 = result.x
+                            else:
+                                # If optimization fails, the best guess is to use the previous sd
+                                sd2 = sd1
+                                restricted[i] = 2
+                else:
+                    # no sd2 computed, because there was no carving at the previous point
+                    sd2 = uncertainty * local_sigma
             else:
                 # First point, no previous point to compare
                 sd2 = uncertainty * local_sigma
+
             sd2_vec[i] = sd2
             weights = norm.pdf(distances, loc=distances[i], scale=sd2)
             weights /= weights.sum()  # Normalize weights
@@ -118,7 +125,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
             smoothed_values[i] = np.sum(weights * values)
 
             # Final check: if the smoothed value is lower than the previous one, we set it to the previous one
-            # It seems to happen sometimes although it should not. I could not find the reason why. Probably a numerical approximation in the optimization.
+            # (could not be the case after an area without corrections)
             if i > 0 and smoothed_values[i] < smoothed_values[i - 1]:
                 smoothed_values[i] = smoothed_values[i - 1]
                 restricted[i] = restricted[i]+10
@@ -135,7 +142,7 @@ def Gaussian_weighted_moving_average(listcs, prev_cs, sigma, uncertaintysigma, u
     return
 
 
-def rdp_simplify_and_resample(listcs, epsilon=1.0):
+def rdp_simplify_and_resample(listcs, epsilon=0.03):
     """
     Simplify the cross-section list using Ramer-Douglas-Peucker algorithm,
     then resample back to the original number of points using linear interpolation.
@@ -192,7 +199,7 @@ def rdp_simplify_and_resample(listcs, epsilon=1.0):
     return listcs
 
 
-def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True, rdp_epsilon=0.03):
+def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True, rdp_epsilon=None):
 
     # The process:
     # - Removes bumps in the water surface profile following the quantile carving process of
