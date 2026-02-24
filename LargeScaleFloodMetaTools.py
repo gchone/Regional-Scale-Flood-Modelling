@@ -103,37 +103,41 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
     # 2021-10-19 Assignation of elevation on points on routes (AssignPointToClosestPointOnRoute) done by "2-WAY CLOSEST" instead of "MEAN"
     #  relate table externalised, and inverted
 
-    #relatetable = gc.CreateScratchName("relatetable", data_type="ArcInfoTable", workspace="in_memory")
-    #execute_RelateNetworks(routes, RID_field, routes_3m, RID_field_3m, relatetable, messages)
     RID_field_in_relatetable = [f.name for f in arcpy.Describe(relatetable).fields][2]
-    #RID3m_field_in_relatetable = [f.name for f in arcpy.Describe(relatetable).fields][-2]
 
-    arcpy.MakeXYEventLayer_management (pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
-    arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
+    try:
+        # Using ExtractMultiValuesToPoints on an event layer add a field in the input table
+        # To prevent that, a copy must be previously made
+        tmp_pts_table = gc.CreateScratchName("pts_table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
+        arcpy.CopyFeatures_management(pts_table, tmp_pts_table)
+        arcpy.MakeXYEventLayer_management (tmp_pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
+        arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
 
-    arcpy.AddJoin_management("pts_layer", RID_field_3m, relatetable, RID_field_3m)
+        arcpy.AddJoin_management("pts_layer", RID_field_3m, relatetable, RID_field_3m)
 
-    pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
+        pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
 
-    lidar3m_forws_basename = str(arcpy.Describe(lidar3m_cor).basename)
+        lidar3m_forws_basename = str(arcpy.Describe(lidar3m_cor).basename)
 
-    execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_forws_basename],
-                                             routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
-                                             [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
-                                             [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
-    pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
-    execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
+        execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_forws_basename],
+                                                 routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
+                                                 [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
+                                                 [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
+        pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
+        execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
 
-    arcpy.MakeRouteEventLayer_lr(routes, RID_field, pts_interpolated, pts_bathy_RID_field + " POINT "+pts_bathy_dist_field, "interpolated_lyr")
+        arcpy.MakeRouteEventLayer_lr(routes, RID_field, pts_interpolated, pts_bathy_RID_field + " POINT "+pts_bathy_dist_field, "interpolated_lyr")
 
-    interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
-    arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
+        interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
+        arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
 
-    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
-    execute_WSprocessing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_forws_basename, DEMs_field, temp_outtable, messages)
+        temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+        execute_WSprocessing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_forws_basename, DEMs_field, temp_outtable, messages)
 
-    arcpy.MakeRouteEventLayer_lr(routes, RID_field, temp_outtable, pts_bathy_RID_field + " POINT " + pts_bathy_dist_field, "D8pts_lyr")
-    arcpy.CopyFeatures_management("D8pts_lyr", ouput_table)
+        arcpy.MakeRouteEventLayer_lr(routes, RID_field, temp_outtable, pts_bathy_RID_field + " POINT " + pts_bathy_dist_field, "D8pts_lyr")
+        arcpy.CopyFeatures_management("D8pts_lyr", ouput_table)
+    finally:
+        gc.CleanAllTempFiles()
 
 def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints_D8, outpoints_route, messages):
 
