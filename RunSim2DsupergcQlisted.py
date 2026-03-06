@@ -119,6 +119,55 @@ def check_mass_file(mass_file_path, lastdischarge, zonename, filelog, messages, 
         messages.addErrorMessage(f"[Mass Balance] Unexpected error for {zonename}: {str(e)}")
         return False
 
+def check_simulation_time(mass_file_path, zonename, filelog, messages):
+    """
+    Check if the simulation stopped before time 55000, which indicates it may need to be rerun without steady state.
+
+    Parameters:
+        mass_file_path: Path to the .mass file
+        zonename: Zone name for logging
+        filelog: Log file handle
+        messages: ArcGIS messages object
+
+    Returns:
+        Boolean - True if simulation stopped before time 55000, False otherwise
+    """
+    try:
+        if not os.path.exists(mass_file_path):
+            return False
+
+        # Read the mass file
+        try:
+            with open(mass_file_path, 'r') as f:
+                lines = f.readlines()
+        except IOError as e:
+            log_message(filelog, "WARNING", f"Cannot read mass file for simulation time check: {str(e)}")
+            return False
+
+        # Skip header and empty lines, get the last data line
+        data_lines = [line for line in lines if line.strip() and not line.startswith('Time')]
+        if not data_lines:
+            return False
+
+        last_line = data_lines[-1].split()
+
+        # Extract Time (first column, index 0)
+        try:
+            time_value = float(last_line[0])
+            if time_value <= 55000:
+                log_message(filelog, "WARNING", f"Simulation for {zonename} stopped before time 55000 (steady state not reached). Will retry without -steady flag.")
+                messages.addWarningMessage(f"[Simulation] Simulation for {zonename} stopped before time 55000. Retrying without steady state parameters.")
+                return True
+        except (ValueError, IndexError) as e:
+            log_message(filelog, "WARNING", f"Cannot parse Time from mass file for {zonename}: {str(e)}")
+            return False
+
+        return False
+
+    except Exception as e:
+        log_message(filelog, "WARNING", f"Unexpected exception in check_simulation_time for {zonename}: {type(e).__name__}: {str(e)}")
+        return False
+
 def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_lakes, list_fields_z, voutput, simtime, cfl, channelmanning, r_zbed, list_fieldQ_inbci, str_log, messages):
 
     # Max size of the output window (m). Effective size is latter reduced to 1/4 of the perimeter of the zone, if smaller
@@ -213,19 +262,24 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
         currentresult = str_simfolder + "\\res_" + simname + ".tif"
 
         skipsim = False # Used when a simulation produced no output
-        filelog.write(f"Starting simulations with discharge field: {simname}\n")
+        if arcpy.Exists(currentresult):
+            log_message(filelog, "INFO", f"Simulation result already exists for {simname}. Skipping simulation.")
+            skipsim = True
+        else:
 
-        if not os.path.isdir(currentsimfolder):
-            os.makedirs(currentsimfolder)
+            filelog.write(f"Starting simulations with discharge field: {simname}\n")
 
-        # For each zone (ordered from downstream to upstream)
-        for zone in sortedzones:
-            segment = dictsegmentsin[zone]
-            # Going through the inbci point, ordered by flowacc (from upstream to downstream)
-            for point in sorted(segment, key=lambda q: q[2]):
+            if not os.path.isdir(currentsimfolder):
+                os.makedirs(currentsimfolder)
 
-                if point[3]=="main" and not skipsim: # Main inbci point = a simulation needs to be run
-                    try:
+            # For each zone (ordered from downstream to upstream)
+            for zone in sortedzones:
+                segment = dictsegmentsin[zone]
+                # Going through the inbci point, ordered by flowacc (from upstream to downstream)
+                for point in sorted(segment, key=lambda q: q[2]):
+
+                    if point[3]=="main" and not skipsim: # Main inbci point = a simulation needs to be run
+
                         if not arcpy.Exists(currentsimfolder + "\\elev_zone" + str(point[1]) + ".tif"):
 
                             print("Running simulation on zone " + str(point[1]))
@@ -719,13 +773,62 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
 
                             progres += 1
                             arcpy.SetProgressorPosition(progres)
-                            log_message(filelog, "INFO", f"✓ LISFLOOD-FP simulation completed for zone {point[1]}, sim {simname}")
+                            log_message(filelog, "INFO", f"LISFLOOD-FP simulation completed for zone {point[1]}, sim {simname}")
 
                             zonename = "zone" + str(point[1])
+                            mass_file_path = currentsimfolder + "\\"  + zonename + ".mass"
+
+                            # Check if simulation stopped at time 55000 and retry without -steady flag
+                            if check_simulation_time(mass_file_path, zonename, filelog, messages):
+                                log_message(filelog, "INFO", f"Retrying LISFLOOD-FP simulation for zone {point[1]} without -steady flag")
+
+                                # Delete previous output files to ensure clean retry
+                                output_files_to_remove = [
+                                    currentsimfolder + "\\" + zonename + "-0001.elev",
+                                    currentsimfolder + "\\" + zonename + "-9999.elev",
+                                    currentsimfolder + "\\" + zonename + "-0001.Vx",
+                                    currentsimfolder + "\\" + zonename + "-9999.Vx",
+                                    currentsimfolder + "\\" + zonename + "-0001.Vy",
+                                    currentsimfolder + "\\" + zonename + "-9999.Vy",
+                                    mass_file_path
+                                ]
+                                for output_file in output_files_to_remove:
+                                    if os.path.exists(output_file):
+                                        try:
+                                            os.remove(output_file)
+                                        except Exception as e:
+                                            log_message(filelog, "WARNING", f"Could not remove {output_file}: {str(e)}")
+
+                                # Retry without -steady and -steadytol parameters
+                                try:
+                                    log_message(filelog, "INFO", f"Starting LISFLOOD-FP retry for zone {point[1]}, sim {simname} (without steady state parameters)")
+                                    result = subprocess.run(
+                                        [str_lisfloodfolder + "\\lisflood.exe",
+                                         str_simfolder + "\\zone" + str(point[1]) + ".par"],
+                                        shell=True, cwd=str_simfolder, capture_output=True, text=True, timeout=3600
+                                    )
+                                    if result.returncode != 0:
+                                        log_message(filelog, "ERROR", f"LISFLOOD-FP retry failed for zone {point[1]}, sim {simname}. Return code: {result.returncode}")
+                                        if result.stderr:
+                                            log_message(filelog, "ERROR", f"LISFLOOD stderr: {result.stderr[:500]}")
+                                        messages.addErrorMessage(f"[LISFLOOD] LISFLOOD-FP retry simulation failed for zone {point[1]}")
+                                        skipsim = True
+                                        continue
+                                    else:
+                                        log_message(filelog, "INFO", f"LISFLOOD-FP retry simulation completed successfully for zone {point[1]}, sim {simname}")
+                                except subprocess.TimeoutExpired:
+                                    log_message(filelog, "ERROR", f"LISFLOOD-FP retry timeout for zone {point[1]}, sim {simname} (> 1 hour)")
+                                    messages.addErrorMessage(f"[LISFLOOD] LISFLOOD-FP retry timeout for zone {point[1]}")
+                                    skipsim = True
+                                    continue
+                                except Exception as e:
+                                    log_message(filelog, "ERROR", f"LISFLOOD-FP retry execution error for zone {point[1]}, sim {simname}: {type(e).__name__}: {str(e)}")
+                                    messages.addErrorMessage(f"[LISFLOOD] LISFLOOD-FP retry execution error for zone {point[1]}: {str(e)}")
+                                    skipsim = True
+                                    continue
 
                             # Validate mass balance
                             try:
-                                mass_file_path = currentsimfolder + "\\"  + zonename + ".mass"
                                 check_mass_file(mass_file_path, lastdischarge, zonename, filelog, messages)
                             except Exception as e:
                                 log_message(filelog, "ERROR", f"Exception during mass balance validation for {zonename}: {type(e).__name__}: {str(e)}")
@@ -805,33 +908,37 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 messages.addErrorMessage(f"[Output] Error during file conversion for {zonename}")
                                 skipsim = True
                                 continue
+                        else:
+                            log_message(filelog, "INFO",
+                                        f"Simulation skipped zone {str(point[1])}, results already exist (existing results merged)")
+                            messages.addMessage(f"Simulation skipped zone {str(point[1])}, results already exist (existing results merged)")
 
-                            # Raster processing and summary
-                            try:
-                                if not arcpy.Exists(currentresult):
-                                    try:
-                                        arcpy.Copy_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult)
-                                    except Exception as e:
-                                        log_message(filelog, "ERROR", f"Failed to create initial result raster for {currentresult}: {str(e)}")
-                                        messages.addErrorMessage(f"[Output] Failed to create result raster: {str(e)}")
-                                        skipsim = True
-                                else:
-                                    try:
-                                        arcpy.Mosaic_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult, mosaic_type="MAXIMUM")
-                                    except Exception as e:
-                                        log_message(filelog, "ERROR", f"Failed to mosaic elevation raster for zone {point[1]}: {str(e)}")
-                                        messages.addErrorMessage(f"[Output] Failed to mosaic raster for zone {point[1]}: {str(e)}")
-                                        skipsim = True
+                        # Raster processing and summary
+                        try:
+                            if not arcpy.Exists(currentresult):
+                                try:
+                                    arcpy.Copy_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult)
+                                except Exception as e:
+                                    log_message(filelog, "ERROR", f"Failed to create initial result raster for {currentresult}: {str(e)}")
+                                    messages.addErrorMessage(f"[Output] Failed to create result raster: {str(e)}")
+                                    skipsim = True
+                            else:
+                                try:
+                                    arcpy.Mosaic_management(currentsimfolder + "\\elev_" + "zone"+str(point[1]) + ".tif", currentresult, mosaic_type="MAXIMUM")
+                                except Exception as e:
+                                    log_message(filelog, "ERROR", f"Failed to mosaic elevation raster for zone {point[1]}: {str(e)}")
+                                    messages.addErrorMessage(f"[Output] Failed to mosaic raster for zone {point[1]}: {str(e)}")
+                                    skipsim = True
 
-                            except BaseException as e:
-                                error_type = type(e).__name__
-                                error_msg = f"CRITICAL ERROR in {simname}: simulation aborted during zone {point[1]}\nError Type: {error_type}\nError Message: {str(e)}"
-                                log_message(filelog, "ERROR", error_msg)
-                                filelog.write(repr(e) + "\n")
-                                filelog.write("=" * 80 + "\n")
-                                messages.addErrorMessage(f"[Critical] {error_msg}")
-                                messages.addWarningMessage("Some simulations skipped. See log file for details.")
-                                skipsim = True
+                        except BaseException as e:
+                            error_type = type(e).__name__
+                            error_msg = f"CRITICAL ERROR in {simname}: simulation aborted during zone {point[1]}\nError Type: {error_type}\nError Message: {str(e)}"
+                            log_message(filelog, "ERROR", error_msg)
+                            filelog.write(repr(e) + "\n")
+                            filelog.write("=" * 80 + "\n")
+                            messages.addErrorMessage(f"[Critical] {error_msg}")
+                            messages.addWarningMessage("Some simulations skipped. See log file for details.")
+                            skipsim = True
 
     # Summary and cleanup
     log_message(filelog, "INFO", "=" * 80)
