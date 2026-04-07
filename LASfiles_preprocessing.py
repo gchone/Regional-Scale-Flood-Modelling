@@ -98,7 +98,7 @@ def execute_groundclassification(str_binlastoolsfolder, input_folder, ground_fol
             os.makedirs(outputfolder)
 
         p = subprocess.Popen(
-            [str_binlastoolsfolder + "\\lasground_new64.exe", "-i", os.path.join(input_folder, folder, "*.la?"), "-odir",
+            [str_binlastoolsfolder + "\\lasground_new64.exe", "-demo", "-i", os.path.join(input_folder, folder, "*.la?"), "-odir",
              outputfolder, "-keep_class", "2"], cwd=input_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         out, err = p.communicate()  # make the script wait for the lasground to be done
 
