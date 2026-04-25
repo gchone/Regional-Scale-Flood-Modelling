@@ -75,7 +75,7 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.ROUTES,
-                "Input route feature class (lines)",
+                "Input route feature class (routes_main)",
                 [QgsProcessing.TypeVectorLine],
             )
         )
@@ -83,15 +83,15 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFeatureSource(
                 self.LINKS,
-                "Link table",
-                [QgsProcessing.TypeVectorNoGeometry],
+                "Linkes table (routes_main_links)",
+                [QgsProcessing.TypeVector],
             )
         )
 
         self.addParameter(
             QgsProcessingParameterField(
                 self.RID_FIELD,
-                "RouteID field",
+                "RouteID field (RID)",
                 parentLayerParameterName=self.ROUTES,
             )
         )
@@ -99,35 +99,35 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterRasterLayer(
                 self.R_FLOW_DIR,
-                "Flow direction raster",
+                "Flow direction raster (e.g., d4fd, pathpointsD8)",
             )
         )
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.ROUTED8,
-                "routesD8",
+                "routesD8, routesD4",
             )
         )
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.LINKSD8,
-                "linksD8",
+                "linksD8, linksD4",
             )
         )
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.PTSOND8,
-                "pathpointsD8",
+                "pathpointsD8, pathpointsD4",
             )
         )
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.RELATETABLE,
-                "relatetable",
+                "fd_net_relatetable, D4fd_net_relatetable",
             )
         )
 
@@ -160,7 +160,6 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
         # Output 1: routesD8 (lines)
         route_fields = QgsFields()
         route_fields.append(QgsField("RID", QMetaType.LongLong))
-        route_fields.append(QgsField("Shape_Length", QMetaType.Double))
         route_fields.append(QgsField("ORIG_FID", QMetaType.LongLong))
 
         (route_sink, route_id) = self.parameterAsSink(
@@ -168,7 +167,7 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
             self.ROUTED8,
             context,
             route_fields,
-            QgsWkbTypes.MultiLineStringM,
+            QgsWkbTypes.LineString,
             crs,
         )
 
@@ -200,8 +199,8 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
         # Output 2: linksD8 (table)
         link_fields = QgsFields()
         link_fields.append(QgsField("id", QMetaType.LongLong))
-        link_fields.append(QgsField("DownRID", QMetaType.LongLong))
-        link_fields.append(QgsField("UpRID", QMetaType.LongLong))
+        link_fields.append(QgsField("DownID", QMetaType.LongLong))
+        link_fields.append(QgsField("UpID", QMetaType.LongLong))
 
         (links_sink, links_id) = self.parameterAsSink(
             parameters,
