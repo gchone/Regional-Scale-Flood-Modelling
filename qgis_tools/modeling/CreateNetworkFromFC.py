@@ -11,7 +11,6 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QVariant, QMetaType
 
-# Add qgis_tools root to path so Processing script can import tree_qgis package (TreeTools)
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from tree_qgis.TreeTools import create_network_from_fc
@@ -46,14 +45,14 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
             "link table and a RouteID. Run twice: once for the network containing secondary "
             "branches and once for the main network.\n\n"
             "Inputs:\n"
-            "- Input feature class (lines): line layer (e.g., linear_net_d / linear_main_d)\n"
-            "- RouteID field: RID (RouteID)\n"
+            "- Input feature class : line layer (e.g., linear_net_d / linear_main_d)\n"
+            "- RouteID field (RID)\n"
             "- Field identifying the most downstream reach: DownEnd (value = 1 for downstream end)\n"
             "- Field identifying the main or secondary channel (optional): Main "
             "(1 = main channel, 0 = secondary)\n\n"
             "Outputs:\n"
-            "- routes_main: oriented network layer\n"
-            "- routes_main_links: link table (DownRID → UpRID)\n"
+            "- routes or routes_main: oriented network layer\n"
+            "- routes_links or routes_main_links: link table (DownRID → UpRID)\n"
         )
 
     def initAlgorithm(self, config=None):
@@ -67,7 +66,7 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.RIVNET,
-                "Input feature class (lines)",
+                "Input feature class (linear_net_d / linear_main_d)",
                 [QgsProcessing.TypeVectorLine],
             )
         )
@@ -83,7 +82,7 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterField(
                 self.DOWNSTREAM_FIELD,
-                "Field identifying the most downstream reach",
+                "Field identifying the most downstream reach (DownEnd)",
                 parentLayerParameterName=self.RIVNET,
             )
         )
@@ -91,7 +90,7 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterField(
                 self.CHANNELTYPE_FIELD,
-                "Field identifying the main or secondary channel",
+                "Field identifying the main or secondary channel (Main)",
                 parentLayerParameterName=self.RIVNET,
                 optional=True,
             )
@@ -100,17 +99,16 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.ROUTE_SHAPEFILE,
-                "routes_main",
+                "routes/routes_main",
             )
         )
 
         self.addParameter(
             QgsProcessingParameterFeatureSink(
                 self.ROUTELINKS_TABLE,
-                "routes_main_links",
+                "routes_links, routes_main_links",
             )
         )
-
 
     def processAlgorithm(self, parameters, context, feedback):
         rivernet = self.parameterAsVectorLayer(parameters, self.RIVNET, context)
@@ -135,7 +133,7 @@ class CreateNetworkFromFC(QgsProcessingAlgorithm):
             self.ROUTE_SHAPEFILE,
             context,
             rivernet.fields(),
-            rivernet.wkbType(),
+            QgsWkbTypes.LineStringM,
             rivernet.sourceCrs(),
         )
 
