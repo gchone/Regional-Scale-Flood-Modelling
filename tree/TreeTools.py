@@ -272,7 +272,7 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
 
             # Creating lines
             arcpy.CreateFeatureclass_management("in_memory", "LINES", "POLYLINE", spatial_reference=str_frompoints)
-            lines = "in_memory\LINES"
+            lines = r"in_memory\LINES"
             arcpy.AddField_management(lines, routeID_field, "LONG")
             arcpy.AddField_management(lines, "ORIG_FID", "LONG")
             linecursor = arcpy.da.InsertCursor(lines, ["SHAPE@", routeID_field, "ORIG_FID"])
@@ -372,7 +372,7 @@ def execute_CreateTreeFromShapefile(rivernet, route_shapefile, routelinks_table,
         # First, check that the input data is properly dissolved
         nb_lines = int(arcpy.GetCount_management(rivernet)[0])
         dissolved = gc.CreateScratchName("net", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
-        arcpy.management.Dissolve(nb_lines, dissolved, multi_part="SINGLE_PART")
+        arcpy.management.Dissolve(rivernet, dissolved, multi_part="SINGLE_PART")
         nb_lines_d = int(arcpy.GetCount_management(dissolved)[0])
         gc.CleanTempFile(dissolved)
         if nb_lines != nb_lines_d:
