@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from collections import defaultdict
+from qgis.PyQt.QtCore import QVariant
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -67,13 +68,20 @@ class RiverNetwork:
 
         for f in links.getFeatures():
             down_id = f[self.LINKS_DOWN_FIELD]
-            up_id   = f[self.LINKS_UP_FIELD]
+            up_id = f[self.LINKS_UP_FIELD]
             if down_id is None or up_id is None:
                 continue
             down_id = int(down_id)
-            up_id   = int(up_id)
-            self._links_down[up_id] = down_id
-            self._links_up[down_id].append(up_id)
+            up_id = int(up_id)
+            if up_id not in self._reaches:
+                continue
+            if down_id in self._reaches:
+                self._links_down[up_id] = down_id
+                self._links_up[down_id].append(up_id)
+            else:
+                print(f"  [RiverNetwork] WARNING: reach {up_id} links downstream to "
+                      f"{down_id} which is not in the network — treating {up_id} "
+                      f"as downstream end of network")
 
     def get_reach(self, rid):
         """Return the Reach object for a given RID."""
@@ -441,7 +449,7 @@ class PointsCollection:
                 if attr in ("id", "reach_id", "dist"):
                     continue
                 val = f[field]
-                extra[attr] = float(val) if val is not None else None
+                extra[attr] = float(val) if (val is not None and not isinstance(val, QVariant)) else None
 
             pt = DataPoint(
                 points_collection=self,
