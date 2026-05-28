@@ -504,7 +504,7 @@ def tree_from_flowdir(
         feedback       : QgsProcessingFeedback or None
 
     Returns:
-        route_features : list of QgsFeature (LineString) with fields [RID, ORIG_FID]
+        route_features : list of QgsFeature (LineString) with fields [RID, RID_routesmain]
         links_rows     : list of (downRID, upRID)
         points_rows    : list of (id, RID, dist, offset, X, Y, row, col)
     """
@@ -787,7 +787,7 @@ def tree_from_flowdir(
 
     route_fields = QgsFields()
     route_fields.append(QgsField(rid_field, QMetaType.LongLong))
-    route_fields.append(QgsField("ORIG_FID", QMetaType.LongLong))
+    route_fields.append(QgsField("RID_routesmain", QMetaType.LongLong))
 
     route_features = []
     for rid in sorted(rid_to_indices.keys()):
@@ -814,7 +814,7 @@ def tree_from_flowdir(
         feat = QgsFeature(route_fields)
         feat.setGeometry(QgsGeometry.fromPolylineXY(geom_pts))
         feat.setAttribute(rid_field, int(rid))
-        feat.setAttribute("ORIG_FID", int(original_fp.get(rid, -999)))
+        feat.setAttribute("RID_routesmain", int(original_fp.get(rid, -999)))
         route_features.append(feat)
 
     # --- Pack points rows ---
