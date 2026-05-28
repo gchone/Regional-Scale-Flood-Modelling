@@ -81,7 +81,7 @@ def flow_direction_network(routes, links, rid_field, r_flow_dir, feedback=None):
     # relate_networks() expects a QgsVectorLayer, not a feature list
     route_fields = QgsFields()
     route_fields.append(QgsField(rid_field, QMetaType.LongLong))
-    route_fields.append(QgsField("ORIG_FID", QMetaType.LongLong))
+    route_fields.append(QgsField("RID_routesmain", QMetaType.LongLong))
 
     crs = routes.sourceCrs()
     routed8_layer = QgsVectorLayer(
@@ -110,7 +110,7 @@ def flow_direction_network(routes, links, rid_field, r_flow_dir, feedback=None):
         d8_rid = int(feat[rid_field])
         orig = rid_b_to_rid_a.get(d8_rid, -999)
         new_f = QgsFeature(feat)
-        new_f.setAttribute("ORIG_FID", orig)
+        new_f.setAttribute("RID_routesmain", orig)
         fixed_features.append(new_f)
     routed8_features = fixed_features
 
