@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import csv
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -12,6 +13,8 @@ from qgis.core import (
     QgsFields,
     QgsField,
     QgsWkbTypes,
+    QgsGeometry,
+    QgsPointXY,
 )
 from qgis.PyQt.QtCore import QMetaType
 
@@ -400,3 +403,538 @@ def execute_order_reaches(
         )
 
     return out_features
+
+
+def spatialize_q_from_gauging_stations(
+        flow_acc,
+        routes_d8,
+        rid_field_d8,
+        links_d8,
+        d8_pathpoints,
+        q_stations,
+        id_field_q,
+        name_field_q,
+        drainage_field_q,
+        q_distance,
+        csv_file,
+        dem_footprints,
+        dem_id_field,
+        beta,
+        feedback,
+):
+    """
+    Spatializes discharge from gauging stations across the D8 network.
+
+    Uses drainage area power law: Q = Q_station x (A/A_station)^beta
+
+    RID and MEAS for gauging stations are computed internally by locating
+    each station along the D8 routes — equivalent to ArcGIS
+    LocateFeaturesAlongRoutes_lr.
+
+    Args:
+        flow_acc         : QgsRasterLayer  - flow accumulation raster
+        routes_d8        : QgsVectorLayer  - D8 routes (lines)
+        rid_field_d8     : str             - RID field in routes
+        links_d8         : QgsVectorLayer  - DownID/UpID link table
+        d8_pathpoints    : QgsVectorLayer  - points along D8 routes (table with X, Y)
+        q_stations       : QgsVectorLayer  - gauging station points
+        id_field_q       : str             - ID field in stations
+        name_field_q     : str             - name field (must match CSV headers)
+        drainage_field_q : str             - drainage area field (km2)
+        q_distance       : float           - maximum snap distance to river (m)
+        csv_file         : str             - path to CSV with discharges
+        dem_footprints   : QgsVectorLayer  - DEM footprint polygons
+        dem_id_field     : str             - ID_DEM field in footprints
+        beta             : float           - drainage area exponent
+        feedback         : QgsProcessingFeedback
+
+    Returns:
+        list of dicts - pathpoints with computed discharge
+    """
+    from qgis.core import QgsSpatialIndex, QgsVectorLayer, QgsFeature, QgsFields, QgsField
+    from qgis.PyQt.QtCore import QMetaType
+    from tree_qgis.RiverNetwork import RiverNetwork, PointsCollection, DataPoint
+
+    # -------------------------------------------------------------------------
+    # Step 1: Extract flow accumulation to D8 pathpoints
+    # -------------------------------------------------------------------------
+    feedback.pushInfo("Step 1/6: Extracting flow accumulation to D8 pathpoints...")
+
+    ds      = gdal.Open(flow_acc.source())
+    gt      = ds.GetGeoTransform()
+    band    = ds.GetRasterBand(1)
+    nodata  = band.GetNoDataValue()
+    cell_width  = abs(gt[1])
+    cell_height = abs(gt[5])
+
+    d8_pts_data = []
+    for feat in d8_pathpoints.getFeatures():
+        if feedback.isCanceled():
+            break
+        d = {}
+        for f in d8_pathpoints.fields().names():
+            d[f] = feat[f]
+
+        if "X" in d and "Y" in d and d["X"] is not None and d["Y"] is not None:
+            x   = float(d["X"])
+            y   = float(d["Y"])
+            col = int((x - gt[0]) / gt[1])
+            row = int((y - gt[3]) / gt[5])
+            if 0 <= col < ds.RasterXSize and 0 <= row < ds.RasterYSize:
+                val = band.ReadAsArray(col, row, 1, 1)
+                if val is not None:
+                    pixel_val    = float(val[0][0])
+                    d["flowacc"] = None if (nodata is not None and pixel_val == nodata) else pixel_val
+                else:
+                    d["flowacc"] = None
+            else:
+                d["flowacc"] = None
+        else:
+            d["flowacc"] = None
+
+        d8_pts_data.append(d)
+
+    ds = None
+    feedback.pushInfo(f"  Loaded {len(d8_pts_data)} D8 pathpoints")
+
+    # -------------------------------------------------------------------------
+    # Step 2: Spatial join pathpoints with DEM footprints to get ID_DEM
+    # -------------------------------------------------------------------------
+    feedback.pushInfo("Step 2/6: Assigning DEM IDs to pathpoints...")
+
+    dem_feats = list(dem_footprints.getFeatures())
+    for pt in d8_pts_data:
+        if feedback.isCanceled():
+            break
+        if "X" in pt and "Y" in pt:
+            test_geom      = QgsGeometry.fromPointXY(QgsPointXY(float(pt["X"]), float(pt["Y"])))
+            pt[dem_id_field] = None
+            for dem_feat in dem_feats:
+                if dem_feat.geometry().contains(test_geom) or dem_feat.geometry().distance(test_geom) == 0.0:
+                    pt[dem_id_field] = dem_feat[dem_id_field]
+                    break
+
+    # -------------------------------------------------------------------------
+    # Step 3: Locate gauging stations along D8 routes to get RID and MEAS
+    #         Equivalent to ArcGIS LocateFeaturesAlongRoutes_lr
+    # -------------------------------------------------------------------------
+    feedback.pushInfo("Step 3/6: Locating gauging stations along D8 routes...")
+
+    route_index = QgsSpatialIndex()
+    route_feats = {}
+    for feat in routes_d8.getFeatures():
+        route_index.insertFeature(feat)
+        route_feats[feat.id()] = feat
+
+    q_stations_data = []
+    for feat in q_stations.getFeatures():
+        if feedback.isCanceled():
+            break
+
+        pt_geom = feat.geometry()
+        if pt_geom is None or pt_geom.isEmpty():
+            continue
+
+        search_rect = pt_geom.boundingBox()
+        search_rect.grow(q_distance)
+        candidate_ids = route_index.intersects(search_rect)
+
+        best_rid  = None
+        best_meas = None
+        best_dist = float("inf")
+
+        for fid in candidate_ids:
+            route_feat = route_feats[fid]
+            route_geom = route_feat.geometry()
+            nearest    = route_geom.nearestPoint(pt_geom)
+            snap_dist  = nearest.distance(pt_geom)
+
+            if snap_dist <= q_distance and snap_dist < best_dist:
+                best_dist = snap_dist
+                best_rid  = int(route_feat[rid_field_d8])
+                best_meas = route_geom.lineLocatePoint(pt_geom)
+
+        if best_rid is None:
+            feedback.pushWarning(
+                f"  Station '{feat[name_field_q]}' (id={feat[id_field_q]}) "
+                f"is more than {q_distance}m from any D8 route — skipping."
+            )
+            continue
+
+        q_stations_data.append({
+            "id":            feat[id_field_q],
+            "name":          feat[name_field_q],
+            "drainage_area": float(feat[drainage_field_q]),
+            "RID":           best_rid,
+            "dist":          best_meas,
+        })
+
+    feedback.pushInfo(f"  Located {len(q_stations_data)} gauging station(s) on D8 routes")
+
+    # -------------------------------------------------------------------------
+    # Step 4: Read discharge CSV
+    # -------------------------------------------------------------------------
+    feedback.pushInfo("Step 4/6: Reading discharge CSV...")
+
+    q_dict = {}
+    with open(csv_file, 'r') as csvfile:
+        csvreader     = csv.DictReader(csvfile)
+        station_names = csvreader.fieldnames[1:]
+        for station in station_names:
+            q_dict[station] = {}
+        first_col = csvreader.fieldnames[0]
+        for line in csvreader:
+            id_dem = line[first_col]
+            for station in station_names:
+                try:
+                    q_dict[station][id_dem] = float(line[station])
+                except (ValueError, KeyError):
+                    q_dict[station][id_dem] = None
+
+    feedback.pushInfo(
+        f"  Read discharges for {len(q_dict)} station(s) "
+        f"across {len(q_dict[station_names[0]])} DEM day(s)"
+    )
+
+    for station in q_stations_data:
+        station_name = station["name"]
+        if station_name not in q_dict:
+            feedback.pushWarning(f"  Station '{station_name}' not found in CSV — skipping.")
+            station["discharges"] = {}
+        else:
+            station["discharges"] = q_dict[station_name]
+
+    # -------------------------------------------------------------------------
+    # Step 5: Build RiverNetwork and PointsCollections
+    #         Mirrors ArcGIS: network.load_data / Qcollection / targetcollection
+    # -------------------------------------------------------------------------
+    feedback.pushInfo("Step 5/6: Building river network and loading points...")
+
+    network = RiverNetwork()
+    network.load_data(routes_d8, links_d8, rid_field=rid_field_d8)
+
+    # --- Build Qcollection (gauging stations) ---
+    # Build a temporary memory layer so PointsCollection.load_table() can read it
+    q_fields = QgsFields()
+    q_fields.append(QgsField("id",            QMetaType.LongLong))
+    q_fields.append(QgsField("RID",           QMetaType.LongLong))
+    q_fields.append(QgsField("dist",          QMetaType.Double))
+    q_fields.append(QgsField("name",          QMetaType.QString))
+    q_fields.append(QgsField("drainage_area", QMetaType.Double))
+
+    q_layer = QgsVectorLayer(
+        f"None?crs={routes_d8.sourceCrs().authid()}", "qstations_tmp", "memory"
+    )
+    pr = q_layer.dataProvider()
+    pr.addAttributes(q_fields)
+    q_layer.updateFields()
+
+    q_feats = []
+    for i, st in enumerate(q_stations_data):
+        f = QgsFeature(q_fields)
+        f.setAttributes([i + 1, st["RID"], st["dist"], st["name"], st["drainage_area"]])
+        q_feats.append(f)
+    pr.addFeatures(q_feats)
+
+    Qcollection = PointsCollection(network, "Qpts")
+    Qcollection.dict_attr_fields["id"] = "id"
+    Qcollection.dict_attr_fields["reach_id"] = "RID"
+    Qcollection.dict_attr_fields["dist"] = "dist"
+    Qcollection.load_table(q_layer)
+
+    # Set name and drainage_area directly on each DataPoint after loading
+    station_by_id = {i + 1: st for i, st in enumerate(q_stations_data)}
+    for pt in Qcollection._points.values():
+        st = station_by_id.get(pt.id)
+        if st:
+            pt.name = st["name"]
+            pt.drainage_area = st["drainage_area"]
+
+    # Assign discharge dictionaries to Qcollection points
+    # Mirrors ArcGIS: Qpts.discharges = Q_dict[Qpts.name]
+    station_discharges = {st["name"]: st["discharges"] for st in q_stations_data}
+    for reach in network.browse_reaches_down_to_up():
+        for qpt in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
+            name = qpt.name
+            if name in station_discharges:
+                qpt.discharges = station_discharges[name]
+            else:
+                feedback.pushWarning(f"  Station '{name}' has no discharges assigned.")
+                qpt.discharges = {}
+
+    # --- Build targetcollection (D8 pathpoints) ---
+    t_fields = QgsFields()
+    t_fields.append(QgsField("id",        QMetaType.LongLong))
+    t_fields.append(QgsField("RID",       QMetaType.LongLong))
+    t_fields.append(QgsField("dist",      QMetaType.Double))
+    t_fields.append(QgsField("flowacc",   QMetaType.Double))
+    t_fields.append(QgsField(dem_id_field, QMetaType.QString))
+
+    t_layer = QgsVectorLayer(
+        f"None?crs={routes_d8.sourceCrs().authid()}", "targetpts_tmp", "memory"
+    )
+    pr2 = t_layer.dataProvider()
+    pr2.addAttributes(t_fields)
+    t_layer.updateFields()
+
+    t_feats = []
+    for i, pt in enumerate(d8_pts_data):
+        rid = pt.get(rid_field_d8)
+        if rid is None:
+            continue
+        f = QgsFeature(t_fields)
+        f.setAttributes([
+            i + 1,
+            int(rid),
+            float(pt.get("dist", 0.0) or 0.0),
+            float(pt["flowacc"]) if pt.get("flowacc") is not None else None,
+            pt.get(dem_id_field),
+        ])
+        t_feats.append(f)
+    pr2.addFeatures(t_feats)
+
+    targetcollection = PointsCollection(network, "target")
+    targetcollection.dict_attr_fields["id"] = "id"
+    targetcollection.dict_attr_fields["reach_id"] = "RID"
+    targetcollection.dict_attr_fields["dist"] = "dist"
+    targetcollection.dict_attr_fields["flowacc"] = "flowacc"
+    targetcollection.load_table(t_layer)
+
+    # Set DEM directly on each DataPoint after loading
+    pt_dem_by_id = {i + 1: pt.get(dem_id_field) for i, pt in enumerate(d8_pts_data) if pt.get(rid_field_d8) is not None}
+    for pt in targetcollection._points.values():
+        pt.DEM = pt_dem_by_id.get(pt.id)
+
+    # -------------------------------------------------------------------------
+    # Step 6: Compute discharges — mirrors ArcGIS execute_SpatializeQ_from_gauging_stations
+    # -------------------------------------------------------------------------
+    feedback.pushInfo("Step 6/6: Computing discharges...")
+
+    result_points = _compute_discharges(
+        network=network,
+        Qcollection=Qcollection,
+        targetcollection=targetcollection,
+        dem_id_field=dem_id_field,
+        beta=beta,
+        cell_width=cell_width,
+        cell_height=cell_height,
+        d8_pts_data=d8_pts_data,
+        feedback=feedback,
+    )
+
+    feedback.pushInfo(f"Done. Computed discharges for {len(result_points)} point(s).")
+    return result_points
+
+
+def _compute_discharges(
+        network,
+        Qcollection,
+        targetcollection,
+        dem_id_field,
+        beta,
+
+        cell_width,
+        cell_height,
+        d8_pts_data,
+        feedback,
+):
+    """
+    Core discharge computation using RiverNetwork traversal.
+
+    Mirrors ArcGIS execute_SpatializeQ_from_gauging_stations browse logic exactly:
+    - First browse (up_to_down):  assign upstream Q station(s) to each target point
+    - Second browse (down_to_up): assign downstream Q station, compute discharge,
+                                  propagate upstream_calculated_Q reach by reach
+
+    Returns list of dicts (original d8_pts_data entries) with 'computedQLiDAR' added.
+    """
+
+    class RefPoint:
+        """Mirrors ArcGIS Ref_point class."""
+        def __init__(self, name, discharges, drainage_area, reach, dist):
+            self.name          = name
+            self.discharges    = discharges
+            self.drainage_area = drainage_area
+            self.reach         = reach
+            self.dist          = dist
+
+    # --- First browse: assign upstream Q station(s) to each target point ---
+    # Mirrors ArcGIS first browse (browse_reaches_up_to_down)
+
+    for reach in network.browse_reaches_down_to_up():
+        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+            targetpt.upQpts = []
+
+    lastQpts = None
+    for reach in network.browse_reaches_up_to_down():
+        if reach.is_upstream_end():
+            lastQpts = None
+
+        for Qpts in reach.browse_points(Qcollection, orientation="UP_TO_DOWN"):
+            if lastQpts is not None:
+                max_dist = lastQpts.dist if lastQpts.reach.id == reach.id else None
+                for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
+                    if (max_dist is None or targetpt.dist <= max_dist) and targetpt.dist > Qpts.dist:
+                        if lastQpts.name not in [pt.name for pt in targetpt.upQpts]:
+                            targetpt.upQpts.append(lastQpts)
+            lastQpts = RefPoint(
+                Qpts.name, Qpts.discharges, Qpts.drainage_area, Qpts.reach, Qpts.dist
+            )
+
+        if lastQpts is not None:
+            max_dist = lastQpts.dist if lastQpts.reach.id == reach.id else None
+            for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
+                if max_dist is None or targetpt.dist <= max_dist:
+                    if lastQpts.name not in [pt.name for pt in targetpt.upQpts]:
+                        targetpt.upQpts.append(lastQpts)
+
+    # --- Second browse: assign downstream Q station and compute discharges ---
+    # Mirrors ArcGIS second browse (browse_reaches_down_to_up)
+
+    for reach in network.browse_reaches_down_to_up():
+        if feedback and feedback.isCanceled():
+            break
+
+        ### Block 1: find closest downstream Q point ###
+
+        lastQpts = None
+        if not reach.is_downstream_end():
+            down_reach = reach.get_downstream_reach()
+            if hasattr(down_reach, "upstream_calculated_Q"):
+                lastQpts = down_reach.upstream_calculated_Q
+
+        for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
+            if lastQpts is not None:
+                min_dist = lastQpts.dist if lastQpts.reach.id == reach.id else 0
+                for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+                    if targetpt.dist >= min_dist:
+                        targetpt.downQpts = lastQpts
+            lastQpts = RefPoint(
+                Qpts.name, Qpts.discharges, Qpts.drainage_area, Qpts.reach, Qpts.dist
+            )
+
+        if lastQpts is not None:
+            min_dist = lastQpts.dist if lastQpts.reach.id == reach.id else 0
+            for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+                if targetpt.dist >= min_dist:
+                    targetpt.downQpts = lastQpts
+
+        ### Block 2: compute discharges ###
+
+        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+
+            if targetpt.flowacc is None:
+                targetpt.computedQLiDAR = -999
+                continue
+            local_area = targetpt.flowacc * cell_width * cell_height / 1_000_000  # km2
+
+            # interpolatedQ is now local to each target point — keyed by station name
+            interpolatedQ = {}
+
+            if not hasattr(targetpt, "downQpts"):
+                # No downstream point — simple proportionality from upstream
+                for uppt in targetpt.upQpts:
+                    interpolatedQ[uppt.name] = {
+                        k: uppt.discharges.get(k, -999) * (local_area / uppt.drainage_area) ** beta
+                        if uppt.discharges.get(k) is not None and uppt.drainage_area > 0
+                        else -999
+                        for k in uppt.discharges
+                    }
+            else:
+                # Linear interpolation of A^beta between upstream and downstream stations
+                down = targetpt.downQpts
+                for uppt in targetpt.upQpts:
+                    denom = down.drainage_area ** beta - uppt.drainage_area ** beta
+                    q_from_down = {}
+                    q_from_up   = {}
+
+                    # Get all discharge keys from both stations
+                    all_keys = set(down.discharges.keys()) | set(uppt.discharges.keys())
+
+                    for k in all_keys:
+                        down_q = down.discharges.get(k)
+                        up_q   = uppt.discharges.get(k)
+
+                        if down_q is not None and denom != 0:
+                            factor = (local_area ** beta - uppt.drainage_area ** beta) / denom
+                            q_from_down[k] = factor * down_q
+                        else:
+                            q_from_down[k] = -999
+
+                        if up_q is not None and denom != 0:
+                            factor = (down.drainage_area ** beta - local_area ** beta) / denom
+                            q_from_up[k] = factor * up_q
+                        else:
+                            q_from_up[k] = -999
+
+                    interpolatedQ[uppt.name] = {
+                        k: q_from_down.get(k, -999) + q_from_up.get(k, -999)
+                        for k in all_keys
+                    }
+
+            # Weight results by upstream station drainage area
+            if len(targetpt.upQpts) > 0:
+                total_weight = sum(s.drainage_area for s in targetpt.upQpts)
+                # Get all discharge keys across all upstream stations
+                all_keys = set()
+                for uppt in targetpt.upQpts:
+                    all_keys |= set(uppt.discharges.keys())
+
+                targetpt.weightedQ = {}
+                for k in all_keys:
+                    weighted_sum = 0.0
+                    for uppt in targetpt.upQpts:
+                        q_val = interpolatedQ.get(uppt.name, {}).get(k, -999)
+                        if q_val != -999 and total_weight > 0:
+                            weighted_sum += q_val * uppt.drainage_area / total_weight
+                        else:
+                            weighted_sum = -999
+                            break
+                    targetpt.weightedQ[k] = weighted_sum
+            else:
+                # No upstream points — use downstream station only
+                if hasattr(targetpt, "downQpts"):
+                    down = targetpt.downQpts
+                    if down.drainage_area > 0:
+                        targetpt.weightedQ = {
+                            k: down.discharges.get(k, -999) * (local_area / down.drainage_area) ** beta
+                            if down.discharges.get(k) is not None
+                            else -999
+                            for k in down.discharges
+                        }
+                    else:
+                        targetpt.weightedQ = {}
+                else:
+                    targetpt.weightedQ = {}
+
+            # Extract discharge for this point's DEM day
+            dem_key = getattr(targetpt, "DEM", None)
+            if hasattr(targetpt, "weightedQ") and dem_key in targetpt.weightedQ:
+                targetpt.computedQLiDAR = targetpt.weightedQ[dem_key]
+            else:
+                targetpt.computedQLiDAR = -999
+
+        ### Block 3: convert last upstream point into Q input for upstream reaches ###
+        # Mirrors ArcGIS: reach.upstream_calculated_Q = Ref_point(...)
+
+        last_pt = reach.get_last_point(targetcollection)
+        if last_pt is not None and hasattr(last_pt, "weightedQ"):
+            reach.upstream_calculated_Q = RefPoint(
+                name          = f"uppt_reach{reach.id}",
+                discharges    = last_pt.weightedQ,
+                drainage_area = last_pt.flowacc * cell_width * cell_height / 1_000_000,
+                reach         = reach,
+                dist          = last_pt.dist,
+            )
+
+    # --- Map computed discharges back to original d8_pts_data dicts ---
+    # targetcollection points are indexed 1..N matching d8_pts_data order
+    pt_id_to_computed = {}
+    for pt in targetcollection._points.values():
+        pt_id_to_computed[pt.id] = getattr(pt, "computedQLiDAR", -999)
+
+    for i, pt in enumerate(d8_pts_data):
+        pt_id = i + 1  # matches the id assigned during load
+        pt["computedQLiDAR"] = pt_id_to_computed.get(pt_id, -999)
+
+    return d8_pts_data
