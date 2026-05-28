@@ -160,7 +160,7 @@ class FlowDirectionNetwork(QgsProcessingAlgorithm):
         # Output 1: routesD8 (lines)
         route_fields = QgsFields()
         route_fields.append(QgsField("RID", QMetaType.LongLong))
-        route_fields.append(QgsField("ORIG_FID", QMetaType.LongLong))
+        route_fields.append(QgsField("RID_routesmain", QMetaType.LongLong))
 
         (route_sink, route_id) = self.parameterAsSink(
             parameters,
