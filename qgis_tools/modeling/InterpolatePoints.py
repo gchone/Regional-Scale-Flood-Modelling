@@ -54,22 +54,24 @@ class InterpolatePoints(QgsProcessingAlgorithm):
             "Interpolates values from data points onto target points along the river network. "
             "Interpolation is done reach by reach, crossing reach boundaries when needed "
             "by looking upstream and downstream for the nearest data points.\n\n"
+            "Used in both the width workflow (width_pts → width_postpro) and the "
+            "water surface workflow.\n\n"
             "Inputs:\n"
-            "- Data points table: points with values to interpolate (net_relate_table)\n"
-            "- ID field in data points: unique identifier\n"
-            "- RID field in data points: RouteID\n"
+            "- Data points table: points with values to interpolate (e.g. width_pts, bathy_on_D4)\n"
+            "- ID field in data points: unique identifier (e.g. id, ObjectID_1)\n"
+            "- RID field in data points: RouteID (e.g. RID)\n"
             "- Distance field in data points: MEAS\n"
-            "- Fields to interpolate: fields with values to interpolate\n"
-            "- Target points: points to interpolate onto (target_pts)\n"
-            "- ID field in target points\n"
-            "- RID field in target points\n"
-            "- Distance field in target points\n"
-            "- Route feature class: routes_main\n"
+            "- Fields to interpolate: fields with values to interpolate (e.g. Width, z)\n"
+            "- Target points: points to interpolate onto (e.g. smoothed_pts, pathpointsD4)\n"
+            "- ID field in target points: unique identifier (e.g. id, ObjectID_1)\n"
+            "- RID field in target points: RouteID (e.g. RID)\n"
+            "- Distance field in target points: MEAS\n"
+            "- Route feature class: oriented route network (e.g. routes_main, routesD4)\n"
             "- RouteID field: RID\n"
             "- Order field: Qorder\n"
-            "- Links table: routes_main_links\n\n"
+            "- Links table: DownID/UpID connectivity (e.g. routes_main_links, linksD4)\n\n"
             "Output:\n"
-            "- Target points with interpolated values\n"
+            "- Target points with interpolated values (e.g. width_postpro, bathy_final)\n"
         )
 
     def initAlgorithm(self, config=None):
@@ -80,11 +82,11 @@ class InterpolatePoints(QgsProcessingAlgorithm):
         )
 
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.POINTS_TABLE, "Data points table",
+            self.POINTS_TABLE, "Data points table (e.g. width_pts, bathy_on_D4)",
             [QgsProcessing.TypeVectorPoint, QgsProcessing.TypeVector],
         ))
         self.addParameter(QgsProcessingParameterField(
-            self.PTS_ID_FIELD, "ID field in data points",
+            self.PTS_ID_FIELD, "ID field in data points (e.g. id, ObjectID_1)",
             parentLayerParameterName=self.POINTS_TABLE,
         ))
         self.addParameter(QgsProcessingParameterField(
@@ -98,16 +100,16 @@ class InterpolatePoints(QgsProcessingAlgorithm):
             defaultValue="MEAS",
         ))
         self.addParameter(QgsProcessingParameterField(
-            self.DATA_FIELDS, "Fields to interpolate",
+            self.DATA_FIELDS, "Fields to interpolate (e.g. Width, z)",
             parentLayerParameterName=self.POINTS_TABLE,
             allowMultiple=True,
         ))
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.TARGETS, "Target points",
+            self.TARGETS, "Target points (e.g. smoothed_pts, pathpointsD4)",
             [QgsProcessing.TypeVectorPoint, QgsProcessing.TypeVector],
         ))
         self.addParameter(QgsProcessingParameterField(
-            self.TARGETS_ID_FIELD, "ID field in target points",
+            self.TARGETS_ID_FIELD, "ID field in target points (e.g. id, ObjectID_1)",
             parentLayerParameterName=self.TARGETS,
         ))
         self.addParameter(QgsProcessingParameterField(
@@ -121,7 +123,7 @@ class InterpolatePoints(QgsProcessingAlgorithm):
             defaultValue="MEAS",
         ))
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.ROUTES, "Route feature class",
+            self.ROUTES, "Route feature class (e.g. routes_main, routesD4)",
             [QgsProcessing.TypeVectorLine],
         ))
         self.addParameter(QgsProcessingParameterField(
@@ -135,11 +137,11 @@ class InterpolatePoints(QgsProcessingAlgorithm):
             defaultValue="Qorder",
         ))
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.LINKS, "Links table",
+            self.LINKS, "Links table (e.g. routes_main_links, linksD4)",
             [QgsProcessing.TypeVector],
         ))
         self.addParameter(QgsProcessingParameterFeatureSink(
-            self.OUTPUT, "Output interpolated points",
+            self.OUTPUT, "Output interpolated points (e.g. width_postpro, bathy_final)",
         ))
 
     def processAlgorithm(self, parameters, context, feedback):
