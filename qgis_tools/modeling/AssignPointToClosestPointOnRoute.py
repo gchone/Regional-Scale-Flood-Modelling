@@ -49,20 +49,22 @@ class AssignPointToClosestPointOnRoute(QgsProcessingAlgorithm):
         return (
             "Assign point to closest point on route\n\n"
             "Projects a point layer to the closest point on a network. "
-            "Both input layers (points and points on network) must have a RouteID field.\n\n"
+            "Both input layers (points and points on network) must have a RouteID field.\n"
+            "This tool is used at multiple steps in the workflow.\n\n"
             "Inputs:\n"
-            "- Points feature class: data points to project (ws_pathpointsD8)\n"
-            "- Fields to keep: fields from data points to transfer to output\n"
-            "- Aggregation method: how to aggregate when multiple data points match a target point\n"
-            "- Route feature class: oriented route network\n"
+            "- Points feature class: data points to project (e.g. ws_pathpointsD8, Qpts_spatialized_D8)\n"
+            "- Fields to keep: fields from data points to transfer to output (e.g. lidar3m_forws, computedQLiDAR)\n"
+            "- Aggregation method: how to aggregate when multiple data points match a target point (e.g. CLOSEST)\n"
+            "- Route feature class: oriented route network (e.g. routes_main)\n"
             "- RouteID field: RID\n"
-            "- Points on route: target points on network (target_pts)\n"
+            "- Points on route: target points on network (e.g. target_pts, smoothed_pts)\n"
             "- RouteID field in target points: RID\n"
             "- Distance field in target points: MEAS\n"
-            "- Fields to match in data points: fields used to group matches (e.g. RID)\n"
-            "- Fields to match in target points: corresponding fields in target points\n\n"
+            "- Fields to match in data points: fields used to group matches (e.g. RID, ID_DEM or RID_routesmain, ID_DEM)\n"
+            "- Fields to match in target points: corresponding fields in target points (e.g. RID, ID_DEM)\n\n"
+            "IMPORTANT: The fields to match must be listed in the same order in both layers.\n\n"
             "Output:\n"
-            "- Target points with data fields assigned\n"
+            "- Target points with data fields assigned (e.g. Qpts_spatialized)\n"
         )
 
     def initAlgorithm(self, config=None):
@@ -74,21 +76,21 @@ class AssignPointToClosestPointOnRoute(QgsProcessingAlgorithm):
         )
 
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.POINTS, "Points feature class (ws_pathpointsD8)",
+            self.POINTS, "Points feature class (e.g. ws_pathpointsD8, Qpts_spatialized_D8)",
             [QgsProcessing.TypeVectorPoint],
         ))
         self.addParameter(QgsProcessingParameterField(
-            self.FIELDS_TO_KEEP, "Fields to keep in output (lidar3m_forws)",
+            self.FIELDS_TO_KEEP, "Fields to keep in output (e.g. lidar3m_forws, computedQLiDAR)",
             parentLayerParameterName=self.POINTS,
             allowMultiple=True,
         ))
         self.addParameter(QgsProcessingParameterEnum(
             self.STAT, "Aggregation method",
             options=self.STAT_OPTIONS,
-            defaultValue=3,  # 2-WAY CLOSEST
+            defaultValue=1,  # CLOSEST
         ))
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.ROUTES, "Route feature class",
+            self.ROUTES, "Route feature class (e.g. routes_main)",
             [QgsProcessing.TypeVectorLine],
         ))
         self.addParameter(QgsProcessingParameterField(
@@ -97,7 +99,7 @@ class AssignPointToClosestPointOnRoute(QgsProcessingAlgorithm):
             defaultValue="RID",
         ))
         self.addParameter(QgsProcessingParameterVectorLayer(
-            self.POINTS_ON_ROUTE, "Points on route (target_pts)",
+            self.POINTS_ON_ROUTE, "Points on route (e.g. target_pts, smoothed_pts)",
             [QgsProcessing.TypeVectorPoint],
         ))
         self.addParameter(QgsProcessingParameterField(
@@ -111,17 +113,17 @@ class AssignPointToClosestPointOnRoute(QgsProcessingAlgorithm):
             defaultValue="MEAS",
         ))
         self.addParameter(QgsProcessingParameterField(
-            self.MATCHING_FIELDS_PTS, "Fields to match in data points (RID)",
+            self.MATCHING_FIELDS_PTS, "Fields to match in data points (e.g. RID_routesmain, ID_DEM — order matters)",
             parentLayerParameterName=self.POINTS,
             allowMultiple=True,
         ))
         self.addParameter(QgsProcessingParameterField(
-            self.MATCHING_FIELDS_TGT, "Fields to match in target points (RID)",
+            self.MATCHING_FIELDS_TGT, "Fields to match in target points (e.g. RID, ID_DEM — must match order above)",
             parentLayerParameterName=self.POINTS_ON_ROUTE,
             allowMultiple=True,
         ))
         self.addParameter(QgsProcessingParameterFeatureSink(
-            self.OUTPUT, "Output point layer",
+            self.OUTPUT, "Output points (e.g. Qpts_spatialized)",
         ))
 
     def processAlgorithm(self, parameters, context, feedback):
@@ -188,7 +190,8 @@ class AssignPointToClosestPointOnRoute(QgsProcessingAlgorithm):
         for f in fields_to_keep:
             if out_fields.indexFromName(f) < 0:
                 out_fields.append(QgsField(f, QMetaType.Double))
-        out_fields.append(QgsField("NEAR_DIST", QMetaType.Double))
+        if stat != "CLOSEST":
+            out_fields.append(QgsField("NEAR_DIST", QMetaType.Double))
 
         (sink, sink_id) = self.parameterAsSink(
             parameters, self.OUTPUT, context,
@@ -228,17 +231,19 @@ def assign_point_to_closest_point_on_route(
 
     Parameters
     ----------
-    data_points          : list of dicts — data points with X, Y, and field values
-    data_fields          : list of str — field names to transfer from data points to target points
-    data_matching_fields : list of str — fields used to match data points to target points
-    target_points        : list of dicts — target points with rid, dist, and matching fields
-    target_rid_field     : str — RID field name in target points
-    target_dist_field    : str — distance field name in target points
+    data_points            : list of dicts — data points with X, Y, and field values
+    data_fields            : list of str — field names to transfer from data points to target points
+    data_matching_fields   : list of str — fields used to match data points to target points
+                             (e.g. ['RID_routesmain', 'ID_DEM'])
+    target_points          : list of dicts — target points with rid, dist, and matching fields
+    target_rid_field       : str — RID field name in target points
+    target_dist_field      : str — distance field name in target points
     target_matching_fields : list of str — fields used to match target points to data points
-    routes               : dict of rid -> QgsGeometry
-    rid_field            : str — RID field name in routes
-    stat                 : str — '2-WAY CLOSEST', 'MEAN', 'MAX', 'CLOSEST'
-    feedback             : QgsProcessingFeedback or None
+                             (e.g. ['RID', 'ID_DEM']) — must be in same order as data_matching_fields
+    routes                 : dict of rid -> QgsGeometry
+    rid_field              : str — RID field name in routes
+    stat                   : str — '2-WAY CLOSEST', 'MEAN', 'MAX', 'CLOSEST'
+    feedback               : QgsProcessingFeedback or None
 
     Returns
     -------
@@ -277,21 +282,15 @@ def assign_point_to_closest_point_on_route(
             continue
 
         if stat == "2-WAY CLOSEST":
-            # Project each data point onto the route geometry and get its linear position
-            # Then for each target point, find the data point with closest linear position
-
             # Build linear positions for data points on their route
             data_linear = []
             for d_pt in d_pts:
                 d_geom = QgsGeometry.fromPointXY(QgsPointXY(d_pt["X"], d_pt["Y"]))
-                # Get the RID for this data point from matching fields
                 rid = match_key[0] if len(match_key) == 1 else None
                 route_geom = routes.get(int(rid)) if rid is not None else None
                 if route_geom:
-                    # Project point onto route and get linear distance along route
                     linear_pos = route_geom.lineLocatePoint(d_geom)
                 else:
-                    # Fall back to using dist field if available
                     linear_pos = float(d_pt.get("dist", 0) or 0)
                 data_linear.append((linear_pos, d_pt))
 
