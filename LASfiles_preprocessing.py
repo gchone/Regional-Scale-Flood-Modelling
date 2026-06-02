@@ -221,6 +221,16 @@ def execute_convertbytile(input_folder, output_folder, ref_raster, cellsize = No
             result = subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True,
                                     capture_output=True)
 
+            # Fill voids using python-GDAL
+            # That could also be done with scipy.interpolate.griddata. I haven't tried yet.
+            driver = gdal.GetDriverByName('GTiff')
+            filled_rasterfile = os.path.splitext(output_rasterfile)[0] + "_filled.tif"
+            dataset = gdal.Open(output_rasterfile)
+            filled_dataset = driver.CreateCopy(filled_rasterfile, dataset, 0)
+            gdal.FillNodata(targetBand=filled_dataset.GetRasterBand(1), maskBand=None,
+                            maxSearchDist=1000, smoothingIterations=0)
+            print(filled_rasterfile + " created")
+
 
 def execute_mergelas(input_folder, output_folder):
     # Merge all LAS files by day of LiDAR acquisition into a single LAS file per day.
