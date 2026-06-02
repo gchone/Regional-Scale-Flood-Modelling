@@ -168,7 +168,7 @@ def check_simulation_time(mass_file_path, zonename, filelog, messages):
         log_message(filelog, "WARNING", f"Unexpected exception in check_simulation_time for {zonename}: {type(e).__name__}: {str(e)}")
         return False
 
-def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_lakes, list_fields_z, voutput, simtime, cfl, channelmanning, r_zbed, list_fieldQ_inbci, str_log, messages):
+def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_lakes, list_fields_z, voutput, simtime, cfl, channelmanning, r_zbed, list_fieldQ_inbci, str_log, messages, r_downstream_lakes=None):
 
     # Max size of the output window (m). Effective size is latter reduced to 1/4 of the perimeter of the zone, if smaller
     max_distoutput = 4000
@@ -176,6 +176,19 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
     str_inbci = str_zonefolder + "\\inbci.shp"
     str_outbci = str_zonefolder + "\\outbci.shp"
     zbed = RasterIO(r_zbed)
+
+    filelog = open(str_log, 'w')
+
+    # Load the downstream lakes raster if provided
+    res_downstream_lakes = None
+    if r_downstream_lakes is not None:
+        try:
+            res_downstream_lakes = RasterIO(arcpy.Raster(r_downstream_lakes))
+            log_message(filelog, "INFO", f"Downstream lakes boundary condition raster loaded: {r_downstream_lakes}")
+        except Exception as e:
+            if filelog is not None:
+                log_message(filelog, "WARNING", f"Could not load downstream lakes raster: {str(e)}")
+            messages.addWarningMessage(f"[LISFLOOD] Could not load downstream lakes raster: {str(e)}")
 
     # Count is used for the progress bar
     count = 0
@@ -249,7 +262,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
     progres = 0
     arcpy.SetProgressorPosition(progres)
 
-    filelog = open(str_log, 'w')
+
 
     ref_raster = None
 
@@ -370,6 +383,30 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             newpoint.lim3 = 0
                             newpoint.lim4 = 0
 
+                            # For zones with lake downstream boundary condition, check if raster has a value
+                            if lakebci and res_downstream_lakes is not None:
+                                try:
+                                    hresult_row_lake = res_downstream_lakes.YtoRow(newpoint.shape.Y)
+                                    hresult_col_lake = res_downstream_lakes.XtoCol(newpoint.shape.X)
+                                    # Looking at the cell elevation just outside of the zone
+                                    if newpoint.side == "W":
+                                        hresult_col_lake -= 1
+                                    elif newpoint.side == "E":
+                                        hresult_col_lake += 1
+                                    elif newpoint.side == "N":
+                                        hresult_row_lake -= 1
+                                    elif newpoint.side == "S":
+                                        hresult_row_lake += 1
+                                    hfix_from_raster = res_downstream_lakes.getValue(hresult_row_lake, hresult_col_lake)
+                                    if hfix_from_raster != res_downstream_lakes.nodata:
+                                        res_downstream = res_downstream_lakes
+                                        lakebci = False
+                                        log_message(filelog, "INFO", f"Zone {point[1]}: Using downstream boundary condition from raster")
+                                    else:
+                                        log_message(filelog, "INFO", f"Zone {point[1]}: Using downstream boundary condition from lake (value={hfix:.2f})")
+                                except Exception as e:
+                                    log_message(filelog, "WARNING", f"Could not extract value from downstream lakes raster for zone {point[1]}: {str(e)}")
+
                             # Starting at the outbci point, going in one direction first (either horizontally or vertically)
                             currentcol = ref_raster.XtoCol(newpoint.shape.X)
                             currentrow = ref_raster.YtoRow(newpoint.shape.Y)
@@ -384,8 +421,8 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             distance = 0
 
                             if not lakebci:
-                                hresult_row = res_downstream.YtoRow(newpoint.shape.Y)
-                                hresult_col = res_downstream.XtoCol(newpoint.shape.X)
+                                hresult_row = ref_raster.YtoRow(newpoint.shape.Y)
+                                hresult_col = ref_raster.XtoCol(newpoint.shape.X)
                                 # Looking at the cell elevation just outside of the zone
                                 if newpoint.side == "W":
                                     hresult_col -= 1
@@ -395,7 +432,9 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                     hresult_row -= 1
                                 elif newpoint.side == "S":
                                     hresult_row += 1
-                                hfix = res_downstream.getValue(hresult_row, hresult_col)
+                                res_downstream_row = res_downstream.YtoRow(ref_raster.RowtoY(hresult_row))
+                                res_downstream_col = res_downstream.XtoCol(ref_raster.ColtoX(hresult_col))
+                                hfix = res_downstream.getValue(res_downstream_row, res_downstream_col)
                                 if hfix != res_downstream.nodata:
                                     # Adding a line in the bci file
                                     if newpoint.side == "N" or newpoint.side == "S":
@@ -658,14 +697,13 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                         hfix = res_downstream.getValue(hresult_row, hresult_col)
 
                                         if hfix != res_downstream.nodata:
-
+                                            # Adding a line in the bci file
                                             filebci.write(
                                                 newpoint.side2 + "\t" + "{0:.2f}".format(
                                                     newpoint.lim4 + distinc / 2.) + "\t" + "{0:.2f}".format(
                                                     newpoint.lim4 - distinc / 2.) + "\tHVAR\thvar" + str(numhvar)+ "\n")
-
+                                            # Adding lines in the bdy file
                                             zdep = min(ref_raster.getValue(currentrow, currentcol) + 0.3, hfix)
-
                                             filebdy.write("\nhvar" + str(numhvar) + "\n")
                                             filebdy.write("4\tseconds\n")
                                             filebdy.write("{0:.2f}".format(zdep) + "\t0\n")
@@ -688,7 +726,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                     newpoint.side + "\t" + "{0:.2f}".format(newpoint.lim1) + "\t" + "{0:.2f}".format(
                                         newpoint.lim2) + "\tHVAR\thvar"+ "\n")
 
-                                # Adding also the needed line in the bdy file
+                                # Adding also the needed lines in the bdy file
                                 zdep = min(zbed.getValue(zbed.YtoRow(newpoint.shape.Y), zbed.XtoCol(newpoint.shape.X)) + 0.3, hfix)
                                 filebdy.write("\nhvar\n")
                                 filebdy.write("4\tseconds\n")
@@ -834,8 +872,8 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 log_message(filelog, "ERROR", f"Exception during mass balance validation for {zonename}: {type(e).__name__}: {str(e)}")
                                 messages.addErrorMessage(f"[Mass Balance] Exception during validation for {zonename}: {str(e)}")
 
-                            if arcpy.Exists(currentsimfolder + "\\tmp_zone" + str(point[1])):
-                                arcpy.Delete_management(currentsimfolder + "\\tmp_zone" + str(point[1]))
+                            if arcpy.Exists(currentsimfolder + "\\tmp_zone" + str(point[1]) + ".tif"):
+                                arcpy.Delete_management(currentsimfolder + "\\tmp_zone" + str(point[1]) + ".tif")
 
                             # Converting output files
                             try:

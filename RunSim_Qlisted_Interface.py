@@ -66,6 +66,12 @@ class RunSim_LISFLOOD(object):
             datatype="GPFeatureLayer",
             parameterType="Required",
             direction="Input")
+        param_lakes_raster = arcpy.Parameter(
+            displayName="Optional: Raster used for downstream boudary condition (overrides the lake polygons data)",
+            name="lakes_raster",
+            datatype="GPRasterLayer",
+            parameterType="Optional",
+            direction="Input")
         param_zfields = arcpy.Parameter(
             displayName="Field for boundary condition",
             name="z_field",
@@ -115,7 +121,7 @@ class RunSim_LISFLOOD(object):
         param_Qfields.parameterDependencies = [param_inbci.name]
 
 
-        params = [param_zones, param_inbci, param_Qfields, param_simfolder, param_lisflood, param_voutput, param_lakes, param_zfields, param_channelmanning, param_simtime, param_cfl, param_zbed, param_log]
+        params = [param_zones, param_inbci, param_Qfields, param_simfolder, param_lisflood, param_voutput, param_lakes, param_zfields, param_channelmanning, param_simtime, param_cfl, param_zbed, param_log, param_lakes_raster]
 
         return params
 
@@ -151,10 +157,13 @@ class RunSim_LISFLOOD(object):
         cfl = float(parameters[10].valueAsText)
         zbed = arcpy.Raster(parameters[11].valueAsText)
         str_log = parameters[12].valueAsText
+        lakes_raster = None
+        if parameters[13].valueAsText is not None:
+            lakes_raster = arcpy.Raster(parameters[13].valueAsText)
         if len(list_qfields) != len(list_zfields):
             messages.addErrorMessage("Number of downstream boundary condition should match the number of input discharges")
         else:
-            execute_RunSim_prev(str_zones, str_simfolder, str_lisflood, str_lakes, list_zfields, voutput, simtime, cfl, channelmanning, zbed, list_qfields, str_log, messages)
+            execute_RunSim_prev(str_zones, str_simfolder, str_lisflood, str_lakes, list_zfields, voutput, simtime, cfl, channelmanning, zbed, list_qfields, str_log, messages, lakes_raster)
 
         return
 
