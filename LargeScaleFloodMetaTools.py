@@ -109,7 +109,7 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
         # Using ExtractMultiValuesToPoints on an event layer add a field in the input table
         # To prevent that, a copy must be previously made
         tmp_pts_table = gc.CreateScratchName("pts_table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
-        arcpy.CopyFeatures_management(pts_table, tmp_pts_table)
+        arcpy.management.Copy(pts_table, tmp_pts_table)
         arcpy.MakeXYEventLayer_management (tmp_pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
         arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
 
