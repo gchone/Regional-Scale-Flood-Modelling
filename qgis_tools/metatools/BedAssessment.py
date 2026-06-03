@@ -288,6 +288,11 @@ def execute_bed_assessment(
         feat = pts_by_id.get(pt.id)
         if feat is None:
             continue
+        geom = feat.geometry()
+        if geom and not geom.isNull():
+            pt_geom = geom.asPoint()
+            pt.X = pt_geom.x()
+            pt.Y = pt_geom.y()
         for attr, field, default in [
             ("Q",       q_field,  0.0),
             ("width",   w_field,  1.0),
@@ -374,7 +379,9 @@ def execute_bed_assessment(
     output_fields = list(points_layer.fields().names()) + [
         "solver", "y", "R", "v", "z", "h", "s", "Fr"
     ]
-    results = [{f: getattr(pt, f, None) for f in output_fields}
+    results = [{**{f: getattr(pt, f, None) for f in output_fields},
+                "X": getattr(pt, "X", None),
+                "Y": getattr(pt, "Y", None)}
                for pt in points_coll._points.values()]
 
     if feedback:
