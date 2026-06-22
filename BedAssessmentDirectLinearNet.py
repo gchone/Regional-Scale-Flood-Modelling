@@ -21,9 +21,10 @@ from Simple1Dhydraulic import *
 
 def execute_BedAssessment(route: object, route_RID_field: object, route_order_field: object, routelinks: object, points: object, points_IDfield: object,
                           points_RIDfield: object, points_distfield: object, points_Qfield: object, points_Wfield: object, points_WSfield: object,
-                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "OVERSAMPLING") -> None:
+                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "OVERSAMPLING", supercritical=False, max_delta_y = None) -> None:
 
     ## Two methods are available:
+    # SIMPLE: Each cross-section is processed individually (no particular extra-process)
     # OVERSAMPLING: adding cross-sections when needed (default, depth parameter is not used)
     # 2-XS: using a two cross-sections downstream to compute the bed elevation for the first one
 
@@ -55,7 +56,6 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
     stopper = BrowsingStopper()
     done_reaches = []
     for reach in rivernet.browse_reaches_up_to_down(prioritize_reach_attribute="order", stopper=stopper):
-        print(reach.id)
         # Looking for the upstream datapoint
         if reach.is_upstream_end():
             prev_cs = None
@@ -67,9 +67,9 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
                 cs.listtosolve = [] # List of cross-sections to use for the hydraulic computation
                 if prev_cs != None:
                     if cs.reach == prev_cs.reach:
-                        cs.localdist = (prev_cs.dist - cs.dist)
+                        cs.localdist_up = (prev_cs.dist - cs.dist)
                     else:
-                        cs.localdist = cs.reach.length - cs.dist + prev_cs.dist
+                        cs.localdist_up = cs.reach.length - cs.dist + prev_cs.dist
                     cs.listtosolve.append(prev_cs)
                 cs.listtosolve.append(cs)
                 cs.position_in_list = 1
@@ -79,7 +79,6 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
     # Add the downstream point to listtosolve
     # Also compute the slope for the most upstream points, where the manning's equation is used, and attribute the
     # manning value to each point
-    print("Down to up")
     for reach in rivernet.browse_reaches_down_to_up():
         if reach.is_downstream_end():
             prev_cs = None
@@ -89,15 +88,13 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
         for cs in reach.browse_points(points_coll):
             cs.n = manning
             if prev_cs is not None:
+                if cs.reach == prev_cs.reach:
+                    cs.localdist_down = (cs.dist - prev_cs.dist)
+                else:
+                    cs.localdist_down = prev_cs.reach.length - prev_cs.dist + cs.dist
                 if reach.is_upstream_end() and cs == lastpoint:
-                    if cs.reach == prev_cs.reach:
-                        localdist = (cs.dist - prev_cs.dist)  # distance between a point and its downstream point
-                        # Not kept for the hydraulic computation, where the distance from the upstream point is used
-                    else:
-                        localdist = prev_cs.reach.length - prev_cs.dist + cs.dist
-                    cs.s = max(min_slope, (cs.wslidar-prev_cs.wslidar)/localdist)
-                if method == "2-XS" and prev_cs.DEM == cs.DEM:
-                    cs.listtosolve.append(prev_cs)
+                    cs.s = max(min_slope, (cs.wslidar-prev_cs.wslidar)/cs.localdist_down)
+                cs.listtosolve.append(prev_cs)
             prev_cs = cs
 
 
@@ -106,7 +103,6 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
     stopper = BrowsingStopper()
     done_reaches = []
     for reach in rivernet.browse_reaches_up_to_down(prioritize_reach_attribute="order", stopper=stopper):
-        print(reach.id)
         # Looking for the upstream datapoint
         if reach.is_upstream_end():
             prev_cs = None
@@ -117,22 +113,31 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
             for cs in reach.browse_points(points_coll, orientation="UP_TO_DOWN"):
                 if prev_cs == None:
                     SolverDirect.manning_solver(cs)
-                    cs.solver = "manning up"
-                    cs.type = 0
                 else:
                     # If there is a change of DEM, use the manning solver, with a slope equal to the upstream energy slope
                     if prev_cs.DEM != cs.DEM:
                         cs.s = prev_cs.s
                         SolverDirect.manning_solver(cs)
-                        cs.solver = "manning"
-                        cs.type = 0
                     else:
                         # For any other point, use the regular inverse hydraulic solver
-                        cs.solver = "regular"
-                        cs.type = 1
-                        __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method)
+                        __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, supercritical, max_delta_y)
                 prev_cs = cs
             done_reaches.append(reach)
+
+    if supercritical:
+        # 1D hydraulic calculations, from downstream to upstream. Process main stream first (based on discharge).
+        for reach in rivernet.browse_reaches_down_to_up(prioritize_reach_attribute="order"):
+            # Looking for the downstream datapoint
+            if reach.is_downstream_end():
+                prev_cs = None
+            # no else: if it's not a downstream reach the prev_cs is already good
+
+            for cs in reach.browse_points(points_coll, orientation="DOWN_TO_UP"):
+                if prev_cs != None and (prev_cs.DEM == cs.DEM) and cs.solver != "manning" and cs.solver != "manning up":
+                    SolverDirect.cs_solver(cs, min_slope, method, supercritical, max_delta_y, True)
+                prev_cs = cs
+            done_reaches.append(reach)
+
 
     points_coll.add_SavedVariable("solver", "str", 10)
     points_coll.add_SavedVariable("y", "float")
@@ -286,54 +291,83 @@ def execute_PostSmoothing(route, route_RID_field, route_order_field, routelinks,
 
     return
 
-def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method):
+def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, supercritical, max_delta_y, working_supercritical=False, ):
 
-    flag = SolverDirect.cs_solver(cs, min_slope, method)
+    flag = SolverDirect.cs_solver(cs, min_slope, method, supercritical, max_delta_y, working_supercritical)
     if not flag.success:
         # The solver issued a warning
         # It's usually because no solution was found
         # The last attempt is most probably the closest value found, so we keep it, but flag the result and add a warning
         cs.solver = "error"
-        cs.type = -999
-        messages.AddWarningMessage("Bed estimation failed at reach ID {} dist {:.2f}m: {}".format(cs.reach.id, cs.dist, flag.message))
+        messages.addWarningMessage("Bed estimation failed at reach ID {} dist {:.2f}m: {}".format(cs.reach.id, cs.dist, flag.message))
 
     # Adding a cross-section if the Froude number varies too much, if method = "OVERSAMPLING"
-    if method=="OVERSAMPLING" and (cs.Fr - prev_cs.Fr) / prev_cs.Fr > 0.5 and cs.localdist > 0.1: # Minimum 10cm between cs
 
-        if cs.reach == prev_cs.reach:
-            newcs = cs.reach.add_point((cs.dist + prev_cs.dist) / 2., cs.points_collection)
-        else:
-            # case where the interpolation takes place between two reaches
-            if cs.localdist / 2. < prev_cs.dist:
-                # point is in the upstream reach (prev_cs reach)
-                newcs = prev_cs.reach.add_point(cs.localdist / 2., cs.points_collection)
-
+    localdist = cs.localdist_up
+    if method=="OVERSAMPLING" and abs(cs.Fr - prev_cs.Fr) / prev_cs.Fr > 0.5 and localdist > 0.1: # Minimum 10cm between cs
+        if not working_supercritical:
+            if cs.reach == prev_cs.reach:
+                newcs = cs.reach.add_point((cs.dist + prev_cs.dist) / 2., cs.points_collection)
             else:
-                newcs = cs.reach.add_point(cs.dist + cs.localdist / 2., cs.points_collection)
+                # case where the interpolation takes place between two reaches
+                if localdist / 2. < prev_cs.dist:
+                    # point is in the upstream reach (prev_cs reach)
+                    newcs = prev_cs.reach.add_point(localdist / 2., cs.points_collection)
 
-        newcs.localdist = cs.localdist / 2.
+                else:
+                    newcs = cs.reach.add_point(cs.dist + localdist / 2., cs.points_collection)
+        else:
+            if cs.reach == prev_cs.reach:
+                newcs = cs.reach.add_point((cs.dist + prev_cs.dist) / 2., cs.points_collection)
+            else:
+                # case where the interpolation takes place between two reaches
+                if prev_cs.dist + localdist / 2. < prev_cs.reach.length:
+                    # point is in the downstream reach (prev_cs reach)
+                    newcs = prev_cs.reach.add_point(prev_cs.dist + localdist / 2., cs.points_collection)
+
+                else:
+                    newcs = cs.reach.add_point(localdist / 2. - (prev_cs.reach.length - prev_cs.dist),
+                                               cs.points_collection)
+
         # Linear interpolation of width, discharge and water surface.
         # Although more accurate spatialization could be done, this is deemed accurate enough
-        a = (cs.width - prev_cs.width) / (0-cs.localdist)
-        newcs.width = a * cs.localdist/2. + cs.width
-        a = (cs.Q - prev_cs.Q) / (0-cs.localdist)
-        newcs.Q = a * cs.localdist/2. + cs.Q
-        a = (cs.wslidar - prev_cs.wslidar) / (0-cs.localdist)
-        newcs.wslidar = a* cs.localdist/2. + cs.wslidar
+        a = (cs.width - prev_cs.width) / (0-localdist)
+        newcs.width = a * localdist/2. + cs.width
+        a = (cs.Q - prev_cs.Q) / (0-localdist)
+        newcs.Q = a * localdist/2. + cs.Q
+        a = (cs.wslidar - prev_cs.wslidar) / (0-localdist)
+        newcs.wslidar = a* localdist/2. + cs.wslidar
         newcs.n = cs.n
         #newcs.s_min = 0
         newcs.DEM = prev_cs.DEM
         newcs.solver = "regular"
-        cs.localdist = cs.localdist / 2.
+
         newcs.listtosolve = [prev_cs, newcs]
         newcs.position_in_list = 1
         cs.listtosolve = [newcs, cs]
         cs.position_in_list = 1
 
-        __recursive_inverse1Dhydro(newcs, prev_cs, min_slope, messages, method)
-        #newcs.solver = "added"
-        newcs.type = 3
-        __recursive_inverse1Dhydro(cs, newcs, min_slope, messages, method)
+        if not working_supercritical:
+            cs.localdist_up = localdist / 2.
+            newcs.localdist_up = localdist / 2.
+            newcs.localdist_down = localdist / 2.
+            prev_cs.localdist_down = localdist / 2.
+            cs.listtosolve[0] = newcs
+            newcs.listtosolve = [prev_cs, newcs, cs]
+            prev_cs.listtosolve[-1] = newcs
+            newcs.position_in_list = 1
+        else:
+            cs.localdist_down = localdist / 2.
+            newcs.localdist_down = localdist / 2.
+            newcs.localdist_up = localdist / 2.
+            prev_cs.localdist_up = localdist / 2.
+            cs.listtosolve[-1] = newcs
+            newcs.listtosolve = [cs, newcs, prev_cs]
+            prev_cs.listtosolve[0] = newcs
+            newcs.position_in_list = 1
+
+        __recursive_inverse1Dhydro(newcs, prev_cs, min_slope, messages, method, supercritical, working_supercritical)
+        __recursive_inverse1Dhydro(cs, newcs, min_slope, messages, method, supercritical, working_supercritical)
 
     return
 
