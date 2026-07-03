@@ -218,6 +218,72 @@ def create_network_from_fc(rivernet, rid_field, downstream_field, channeltype_fi
     if feedback:
         feedback.pushInfo(f"Found {len(down_rids)} downstream reach(es). Resolving outlet endpoint…")
 
+    # Auto-detect reversed line orientation
+    # Lines should have START vertex at the downstream end (outlet) and END vertex at the upstream end (headwaters).
+    # If the outlet is at the START vertex instead, lines are reversed and need to be flipped.
+    needs_flip = False
+    for rid in down_rids:
+        eps = rid_to_endpoints[rid]
+        outlet_ep = None
+        for ep in eps:
+            others = [e for e in node_to_endpoints[ep["NODE"]] if e["RID"] != rid]
+            if len(others) == 0:
+                outlet_ep = ep
+                break
+
+        if outlet_ep is None:
+            eps_sorted = sorted(
+                eps,
+                key=lambda e: len([x for x in node_to_endpoints[e["NODE"]] if x["RID"] != rid])
+            )
+            outlet_ep = eps_sorted[0]
+
+        # Check orientation: outlet should be at START (downstream vertex), not END
+        if outlet_ep["ENDTYPE"] == "End":
+            needs_flip = True
+            if feedback:
+                feedback.pushWarning(
+                    f"Detected reversed line orientation (RID {rid} outlet is at End vertex). "
+                    f"Flipping all lines automatically."
+                )
+            break
+
+    # If lines are reversed, flip them all and rebuild the endpoint index
+    if needs_flip:
+        # Reverse all geometries
+        for rid in rid_to_features.keys():
+            for i, feat in enumerate(rid_to_features[rid]):
+                new_feat = QgsFeature(feat)
+                new_feat.setGeometry(_reverse_line_geometry(feat.geometry()))
+                rid_to_features[rid][i] = new_feat
+
+        # Rebuild endpoint index with reversed geometries
+        rid_to_endpoints.clear()
+        node_to_endpoints.clear()
+        for rid, feats in rid_to_features.items():
+            for f in feats:
+                geom = f.geometry()
+                if geom.isMultipart():
+                    parts = geom.asMultiPolyline()
+                    if not parts or not parts[0]:
+                        continue
+                    line = parts[0]
+                else:
+                    line = geom.asPolyline()
+                    if not line:
+                        continue
+                start_pt = QgsPointXY(line[0])
+                end_pt = QgsPointXY(line[-1])
+                downflag = f[downstream_field]
+                channel = f[channeltype_field] if channeltype_field else None
+                start_node = node_key(start_pt)
+                end_node = node_key(end_pt)
+                e_start = {"RID": rid, "ENDTYPE": "Start", "NODE": start_node, "CHANNEL": channel, "DOWN": downflag}
+                e_end = {"RID": rid, "ENDTYPE": "End", "NODE": end_node, "CHANNEL": channel, "DOWN": downflag}
+                rid_to_endpoints[rid].extend([e_start, e_end])
+                node_to_endpoints[start_node].append(e_start)
+                node_to_endpoints[end_node].append(e_end)
+
     # For each downstream reach, find the endpoint that connects to NO other reach —
     # that is the true outlet end, regardless of digitizing direction.
     downstream_endpoints = []
