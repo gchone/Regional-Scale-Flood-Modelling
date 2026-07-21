@@ -244,6 +244,7 @@ class SpatializeQLiDAR(QgsProcessingAlgorithm):
             row["ID_DEM"] = row.get(dem_id_field)
             row["RID_D8"] = row.get(rid_field_d8)
             row["RID_routesmain"] = rid_to_mainrid.get(int(row.get(rid_field_d8, 0) or 0))
+            row["computedQLiDAR"] = row.get("computedQ")
             f = QgsFeature(out_fields)
             if "X" in row and "Y" in row:
                 f.setGeometry(QgsGeometry.fromPointXY(

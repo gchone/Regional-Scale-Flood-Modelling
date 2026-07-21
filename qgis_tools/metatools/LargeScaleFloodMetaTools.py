@@ -415,21 +415,36 @@ def spatialize_q_from_gauging_stations(
         id_field_q,
         name_field_q,
         drainage_field_q,
-        q_distance,
-        csv_file,
-        dem_footprints,
-        dem_id_field,
-        beta,
-        feedback,
+        q_distance=None,
+        csv_file=None,
+        dem_footprints=None,
+        dem_id_field=None,
+        beta=1.0,
+        feedback=None,
+        rid_field_q=None,
+        dist_field_q=None,
+        q_field=None,
 ):
     """
     Spatializes discharge from gauging stations across the D8 network.
 
     Uses drainage area power law: Q = Q_station x (A/A_station)^beta
 
-    RID and MEAS for gauging stations are computed internally by locating
-    each station along the D8 routes — equivalent to ArcGIS
-    LocateFeaturesAlongRoutes_lr.
+    Mirrors ArcGIS execute_SpatializeQ_from_gauging_stations. Two modes,
+    selected by whether q_field is None (matching ArcGIS's
+    "if Q_field is None" branching):
+
+    - q_field is None (LiDAR discharges): q_stations are located on the
+      D8 network internally via nearest-route search (q_distance), and
+      discharges come from a multi-day CSV (csv_file) keyed by
+      dem_footprints/dem_id_field per pathpoint. Original behavior,
+      unchanged.
+
+    - q_field is not None (flood discharges): q_stations are expected to
+      already carry RID (rid_field_q) and MEAS (dist_field_q) — e.g. from
+      a prior Locate Stations Along Routes run — and the discharge value
+      is read directly from q_field on each station. csv_file,
+      dem_footprints, dem_id_field, q_distance are ignored in this mode.
 
     Args:
         flow_acc         : QgsRasterLayer  - flow accumulation raster
@@ -439,14 +454,18 @@ def spatialize_q_from_gauging_stations(
         d8_pathpoints    : QgsVectorLayer  - points along D8 routes (table with X, Y)
         q_stations       : QgsVectorLayer  - gauging station points
         id_field_q       : str             - ID field in stations
-        name_field_q     : str             - name field (must match CSV headers)
+        name_field_q     : str             - name field (must match CSV headers, LiDAR mode)
         drainage_field_q : str             - drainage area field (km2)
-        q_distance       : float           - maximum snap distance to river (m)
-        csv_file         : str             - path to CSV with discharges
-        dem_footprints   : QgsVectorLayer  - DEM footprint polygons
-        dem_id_field     : str             - ID_DEM field in footprints
+        q_distance       : float or None   - max snap distance to river (m) — LiDAR mode only
+        csv_file         : str or None     - path to CSV with discharges — LiDAR mode only
+        dem_footprints   : QgsVectorLayer or None - DEM footprint polygons — LiDAR mode only
+        dem_id_field     : str or None     - ID_DEM field in footprints — LiDAR mode only
         beta             : float           - drainage area exponent
         feedback         : QgsProcessingFeedback
+        rid_field_q      : str or None     - RID field already on q_stations — flood mode only
+        dist_field_q     : str or None     - MEAS field already on q_stations — flood mode only
+        q_field          : str or None     - discharge field already on q_stations — flood mode only.
+                            When set, switches to flood mode.
 
     Returns:
         list of dicts - pathpoints with computed discharge
@@ -458,7 +477,7 @@ def spatialize_q_from_gauging_stations(
     # -------------------------------------------------------------------------
     # Step 1: Extract flow accumulation to D8 pathpoints
     # -------------------------------------------------------------------------
-    feedback.pushInfo("Step 1/6: Extracting flow accumulation to D8 pathpoints...")
+    feedback.pushInfo("Step 1: Extracting flow accumulation to D8 pathpoints...")
 
     ds      = gdal.Open(flow_acc.source())
     gt      = ds.GetGeoTransform()
@@ -497,124 +516,166 @@ def spatialize_q_from_gauging_stations(
     ds = None
     feedback.pushInfo(f"  Loaded {len(d8_pts_data)} D8 pathpoints")
 
-    # -------------------------------------------------------------------------
-    # Step 2: Spatial join pathpoints with DEM footprints to get ID_DEM
-    # -------------------------------------------------------------------------
-    feedback.pushInfo("Step 2/6: Assigning DEM IDs to pathpoints...")
+    if q_field is None:
+        # =========================================================================
+        # LiDAR discharge mode — original behavior, unchanged
+        # =========================================================================
 
-    dem_feats = list(dem_footprints.getFeatures())
-    for pt in d8_pts_data:
-        if feedback.isCanceled():
-            break
-        if "X" in pt and "Y" in pt:
-            test_geom      = QgsGeometry.fromPointXY(QgsPointXY(float(pt["X"]), float(pt["Y"])))
-            pt[dem_id_field] = None
-            for dem_feat in dem_feats:
-                if dem_feat.geometry().contains(test_geom) or dem_feat.geometry().distance(test_geom) == 0.0:
-                    pt[dem_id_field] = dem_feat[dem_id_field]
-                    break
+        # -------------------------------------------------------------------------
+        # Step 2: Spatial join pathpoints with DEM footprints to get ID_DEM
+        # -------------------------------------------------------------------------
+        feedback.pushInfo("Step 2/6: Assigning DEM IDs to pathpoints...")
 
-    # -------------------------------------------------------------------------
-    # Step 3: Locate gauging stations along D8 routes to get RID and MEAS
-    #         Equivalent to ArcGIS LocateFeaturesAlongRoutes_lr
-    # -------------------------------------------------------------------------
-    feedback.pushInfo("Step 3/6: Locating gauging stations along D8 routes...")
+        dem_feats = list(dem_footprints.getFeatures())
+        for pt in d8_pts_data:
+            if feedback.isCanceled():
+                break
+            if "X" in pt and "Y" in pt:
+                test_geom      = QgsGeometry.fromPointXY(QgsPointXY(float(pt["X"]), float(pt["Y"])))
+                pt[dem_id_field] = None
+                for dem_feat in dem_feats:
+                    if dem_feat.geometry().contains(test_geom) or dem_feat.geometry().distance(test_geom) == 0.0:
+                        pt[dem_id_field] = dem_feat[dem_id_field]
+                        break
 
-    route_index = QgsSpatialIndex()
-    route_feats = {}
-    for feat in routes_d8.getFeatures():
-        route_index.insertFeature(feat)
-        route_feats[feat.id()] = feat
+        # -------------------------------------------------------------------------
+        # Step 3: Locate gauging stations along D8 routes to get RID and MEAS
+        #         Equivalent to ArcGIS LocateFeaturesAlongRoutes_lr
+        # -------------------------------------------------------------------------
+        feedback.pushInfo("Step 3/6: Locating gauging stations along D8 routes...")
 
-    q_stations_data = []
-    for feat in q_stations.getFeatures():
-        if feedback.isCanceled():
-            break
+        route_index = QgsSpatialIndex()
+        route_feats = {}
+        for feat in routes_d8.getFeatures():
+            route_index.insertFeature(feat)
+            route_feats[feat.id()] = feat
 
-        pt_geom = feat.geometry()
-        if pt_geom is None or pt_geom.isEmpty():
-            continue
+        q_stations_data = []
+        for feat in q_stations.getFeatures():
+            if feedback.isCanceled():
+                break
 
-        search_rect = pt_geom.boundingBox()
-        search_rect.grow(q_distance)
-        candidate_ids = route_index.intersects(search_rect)
+            pt_geom = feat.geometry()
+            if pt_geom is None or pt_geom.isEmpty():
+                continue
 
-        best_rid  = None
-        best_meas = None
-        best_dist = float("inf")
+            search_rect = pt_geom.boundingBox()
+            search_rect.grow(q_distance)
+            candidate_ids = route_index.intersects(search_rect)
 
-        for fid in candidate_ids:
-            route_feat = route_feats[fid]
-            route_geom = route_feat.geometry()
-            nearest    = route_geom.nearestPoint(pt_geom)
-            snap_dist  = nearest.distance(pt_geom)
+            best_rid  = None
+            best_meas = None
+            best_dist = float("inf")
 
-            if snap_dist <= q_distance and snap_dist < best_dist:
-                best_dist = snap_dist
-                best_rid  = int(route_feat[rid_field_d8])
-                best_meas = route_geom.lineLocatePoint(pt_geom)
+            for fid in candidate_ids:
+                route_feat = route_feats[fid]
+                route_geom = route_feat.geometry()
+                nearest    = route_geom.nearestPoint(pt_geom)
+                snap_dist  = nearest.distance(pt_geom)
 
-        if best_rid is None:
-            feedback.pushWarning(
-                f"  Station '{feat[name_field_q]}' (id={feat[id_field_q]}) "
-                f"is more than {q_distance}m from any D8 route — skipping."
-            )
-            continue
+                if snap_dist <= q_distance and snap_dist < best_dist:
+                    best_dist = snap_dist
+                    best_rid  = int(route_feat[rid_field_d8])
+                    best_meas = route_geom.lineLocatePoint(pt_geom)
 
-        q_stations_data.append({
-            "id":            feat[id_field_q],
-            "name":          feat[name_field_q],
-            "drainage_area": float(feat[drainage_field_q]),
-            "RID":           best_rid,
-            "dist":          best_meas,
-        })
+            if best_rid is None:
+                feedback.pushWarning(
+                    f"  Station '{feat[name_field_q]}' (id={feat[id_field_q]}) "
+                    f"is more than {q_distance}m from any D8 route — skipping."
+                )
+                continue
 
-    feedback.pushInfo(f"  Located {len(q_stations_data)} gauging station(s) on D8 routes")
+            q_stations_data.append({
+                "id":            feat[id_field_q],
+                "name":          feat[name_field_q],
+                "drainage_area": float(feat[drainage_field_q]),
+                "RID":           best_rid,
+                "dist":          best_meas,
+            })
 
-    # -------------------------------------------------------------------------
-    # Step 4: Read discharge CSV
-    # -------------------------------------------------------------------------
-    feedback.pushInfo("Step 4/6: Reading discharge CSV...")
+        feedback.pushInfo(f"  Located {len(q_stations_data)} gauging station(s) on D8 routes")
 
-    q_dict = {}
-    with open(csv_file, 'r') as csvfile:
-        csvreader     = csv.DictReader(csvfile)
-        station_names = csvreader.fieldnames[1:]
-        for station in station_names:
-            q_dict[station] = {}
-        first_col = csvreader.fieldnames[0]
-        for line in csvreader:
-            id_dem = line[first_col]
+        # -------------------------------------------------------------------------
+        # Step 4: Read discharge CSV
+        # -------------------------------------------------------------------------
+        feedback.pushInfo("Step 4/6: Reading discharge CSV...")
+
+        q_dict = {}
+        with open(csv_file, 'r') as csvfile:
+            csvreader     = csv.DictReader(csvfile)
+            station_names = csvreader.fieldnames[1:]
             for station in station_names:
-                try:
-                    q_dict[station][id_dem] = float(line[station])
-                except (ValueError, KeyError):
-                    q_dict[station][id_dem] = None
+                q_dict[station] = {}
+            first_col = csvreader.fieldnames[0]
+            for line in csvreader:
+                id_dem = line[first_col]
+                for station in station_names:
+                    try:
+                        q_dict[station][id_dem] = float(line[station])
+                    except (ValueError, KeyError):
+                        q_dict[station][id_dem] = None
 
-    feedback.pushInfo(
-        f"  Read discharges for {len(q_dict)} station(s) "
-        f"across {len(q_dict[station_names[0]])} DEM day(s)"
-    )
+        feedback.pushInfo(
+            f"  Read discharges for {len(q_dict)} station(s) "
+            f"across {len(q_dict[station_names[0]])} DEM day(s)"
+        )
 
-    for station in q_stations_data:
-        station_name = station["name"]
-        if station_name not in q_dict:
-            feedback.pushWarning(f"  Station '{station_name}' not found in CSV — skipping.")
-            station["discharges"] = {}
-        else:
-            station["discharges"] = q_dict[station_name]
+        for station in q_stations_data:
+            station_name = station["name"]
+            if station_name not in q_dict:
+                feedback.pushWarning(f"  Station '{station_name}' not found in CSV — skipping.")
+                station["discharges"] = {}
+            else:
+                station["discharges"] = q_dict[station_name]
+
+    else:
+        # =========================================================================
+        # Flood discharge mode — mirrors ArcGIS's "else" branch:
+        # Qpts.discharges = {Q_field: Qpts.discharge}; targetpt.DEM = Q_field
+        # q_stations must already carry RID (rid_field_q) and MEAS (dist_field_q),
+        # e.g. from a prior Locate Stations Along Routes run.
+        # =========================================================================
+        feedback.pushInfo(f"Reading gauging station data for scenario '{q_field}'...")
+
+        q_stations_data = []
+        for feat in q_stations.getFeatures():
+            if feedback.isCanceled():
+                break
+            rid = feat[rid_field_q]
+            if rid is None:
+                feedback.pushWarning(
+                    f"  Station '{feat[name_field_q]}' has no RID — skipping."
+                )
+                continue
+            q_val = feat[q_field]
+            if q_val is None:
+                feedback.pushWarning(
+                    f"  Station '{feat[name_field_q]}' has no discharge value — skipping."
+                )
+                continue
+
+            q_stations_data.append({
+                "id":            feat[id_field_q],
+                "name":          feat[name_field_q],
+                "drainage_area": float(feat[drainage_field_q]),
+                "RID":           int(rid),
+                "dist":          float(feat[dist_field_q]),
+                "discharges":    {q_field: float(q_val)},
+            })
+
+        feedback.pushInfo(f"  Loaded {len(q_stations_data)} gauging station(s)")
+        dem_id_field = "DEM"  # constant field name; value on every target point is q_field
 
     # -------------------------------------------------------------------------
     # Step 5: Build RiverNetwork and PointsCollections
     #         Mirrors ArcGIS: network.load_data / Qcollection / targetcollection
     # -------------------------------------------------------------------------
-    feedback.pushInfo("Step 5/6: Building river network and loading points...")
+    feedback.pushInfo("Building river network and loading points...")
 
     network = RiverNetwork()
     network.load_data(routes_d8, links_d8, rid_field=rid_field_d8)
 
     # --- Build Qcollection (gauging stations) ---
-    # Build a temporary memory layer so PointsCollection.load_table() can read it
     q_fields = QgsFields()
     q_fields.append(QgsField("id",            QMetaType.LongLong))
     q_fields.append(QgsField("RID",           QMetaType.LongLong))
@@ -642,25 +703,26 @@ def spatialize_q_from_gauging_stations(
     Qcollection.dict_attr_fields["dist"] = "dist"
     Qcollection.load_table(q_layer)
 
-    # Set name and drainage_area directly on each DataPoint after loading
     station_by_id = {i + 1: st for i, st in enumerate(q_stations_data)}
     for pt in Qcollection._points.values():
         st = station_by_id.get(pt.id)
         if st:
             pt.name = st["name"]
             pt.drainage_area = st["drainage_area"]
+            if q_field is not None:
+                pt.discharges = st["discharges"]
 
-    # Assign discharge dictionaries to Qcollection points
-    # Mirrors ArcGIS: Qpts.discharges = Q_dict[Qpts.name]
-    station_discharges = {st["name"]: st["discharges"] for st in q_stations_data}
-    for reach in network.browse_reaches_down_to_up():
-        for qpt in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
-            name = qpt.name
-            if name in station_discharges:
-                qpt.discharges = station_discharges[name]
-            else:
-                feedback.pushWarning(f"  Station '{name}' has no discharges assigned.")
-                qpt.discharges = {}
+    if q_field is None:
+        # Assign discharge dictionaries to Qcollection points (LiDAR mode)
+        station_discharges = {st["name"]: st["discharges"] for st in q_stations_data}
+        for reach in network.browse_reaches_down_to_up():
+            for qpt in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
+                name = qpt.name
+                if name in station_discharges:
+                    qpt.discharges = station_discharges[name]
+                else:
+                    feedback.pushWarning(f"  Station '{name}' has no discharges assigned.")
+                    qpt.discharges = {}
 
     # --- Build targetcollection (D8 pathpoints) ---
     t_fields = QgsFields()
@@ -688,7 +750,7 @@ def spatialize_q_from_gauging_stations(
             int(rid),
             float(pt.get("dist", 0.0) or 0.0),
             float(pt["flowacc"]) if pt.get("flowacc") is not None else None,
-            pt.get(dem_id_field),
+            q_field if q_field is not None else pt.get(dem_id_field),
         ])
         t_feats.append(f)
     pr2.addFeatures(t_feats)
@@ -700,15 +762,18 @@ def spatialize_q_from_gauging_stations(
     targetcollection.dict_attr_fields["flowacc"] = "flowacc"
     targetcollection.load_table(t_layer)
 
-    # Set DEM directly on each DataPoint after loading
-    pt_dem_by_id = {i + 1: pt.get(dem_id_field) for i, pt in enumerate(d8_pts_data) if pt.get(rid_field_d8) is not None}
-    for pt in targetcollection._points.values():
-        pt.DEM = pt_dem_by_id.get(pt.id)
+    if q_field is None:
+        pt_dem_by_id = {i + 1: pt.get(dem_id_field) for i, pt in enumerate(d8_pts_data) if pt.get(rid_field_d8) is not None}
+        for pt in targetcollection._points.values():
+            pt.DEM = pt_dem_by_id.get(pt.id)
+    else:
+        for pt in targetcollection._points.values():
+            pt.DEM = q_field
 
     # -------------------------------------------------------------------------
     # Step 6: Compute discharges — mirrors ArcGIS execute_SpatializeQ_from_gauging_stations
     # -------------------------------------------------------------------------
-    feedback.pushInfo("Step 6/6: Computing discharges...")
+    feedback.pushInfo("Computing discharges...")
 
     result_points = _compute_discharges(
         network=network,
@@ -724,7 +789,6 @@ def spatialize_q_from_gauging_stations(
 
     feedback.pushInfo(f"Done. Computed discharges for {len(result_points)} point(s).")
     return result_points
-
 
 def _compute_discharges(
         network,
@@ -746,7 +810,7 @@ def _compute_discharges(
     - Second browse (down_to_up): assign downstream Q station, compute discharge,
                                   propagate upstream_calculated_Q reach by reach
 
-    Returns list of dicts (original d8_pts_data entries) with 'computedQLiDAR' added.
+    Returns list of dicts (original d8_pts_data entries) with 'computedQ' added.
     """
 
     class RefPoint:
@@ -824,7 +888,7 @@ def _compute_discharges(
         for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
 
             if targetpt.flowacc is None:
-                targetpt.computedQLiDAR = -999
+                targetpt.computedQ = -999
                 continue
             local_area = targetpt.flowacc * cell_width * cell_height / 1_000_000  # km2
 
@@ -910,9 +974,9 @@ def _compute_discharges(
             # Extract discharge for this point's DEM day
             dem_key = getattr(targetpt, "DEM", None)
             if hasattr(targetpt, "weightedQ") and dem_key in targetpt.weightedQ:
-                targetpt.computedQLiDAR = targetpt.weightedQ[dem_key]
+                targetpt.computedQ = targetpt.weightedQ[dem_key]
             else:
-                targetpt.computedQLiDAR = -999
+                targetpt.computedQ = -999
 
         ### Block 3: convert last upstream point into Q input for upstream reaches ###
         # Mirrors ArcGIS: reach.upstream_calculated_Q = Ref_point(...)
@@ -931,10 +995,10 @@ def _compute_discharges(
     # targetcollection points are indexed 1..N matching d8_pts_data order
     pt_id_to_computed = {}
     for pt in targetcollection._points.values():
-        pt_id_to_computed[pt.id] = getattr(pt, "computedQLiDAR", -999)
+        pt_id_to_computed[pt.id] = getattr(pt, "computedQ", -999)
 
     for i, pt in enumerate(d8_pts_data):
         pt_id = i + 1  # matches the id assigned during load
-        pt["computedQLiDAR"] = pt_id_to_computed.get(pt_id, -999)
+        pt["computedQ"] = pt_id_to_computed.get(pt_id, -999)
 
     return d8_pts_data
