@@ -52,6 +52,9 @@ def execute_extract_bydays(str_lasfolder, UTC, output_folder):
             # Split and save LAS files by day
             for day in unique_days:
                 mask = np.array([dt.date() == day for dt in datetimes])
+                if mask.sum() == 0:
+                    print(f"Skipping {file} for day {day}: no points.")
+                    continue
                 sub_las = laspy.create(point_format=las.header.point_format, file_version=las.header.version)
                 sub_las.points = las.points[mask]
                 output_filename = os.path.join(output_folder, str(day), file)
