@@ -224,21 +224,36 @@ class BedAssessment(QgsProcessingAlgorithm):
             points.sourceCrs(),
         )
 
+        n_no_geom = 0
+        n_add_failed = 0
+        n_added = 0
+
         for row in results:
             if feedback.isCanceled():
                 break
             f = QgsFeature(out_fields)
-            x = row.get("X") or row.get("x")
-            y_coord = row.get("Y") or row.get("y")
+            x = row.get("X")
+            y_coord = row.get("Y")
             if x is not None and y_coord is not None:
                 try:
                     f.setGeometry(QgsGeometry.fromPointXY(
                         QgsPointXY(float(x), float(y_coord))
                     ))
                 except (TypeError, ValueError):
-                    pass
+                    n_no_geom += 1
+            else:
+                n_no_geom += 1
             f.setAttributes([row.get(field.name()) for field in out_fields])
-            sink.addFeature(f, QgsFeatureSink.FastInsert)
+            ok = sink.addFeature(f, QgsFeatureSink.FastInsert)
+            if ok:
+                n_added += 1
+            else:
+                n_add_failed += 1
+
+        feedback.pushInfo(
+            f"Wrote {n_added} feature(s); {n_add_failed} addFeature() call(s) "
+            f"failed; {n_no_geom} feature(s) had no geometry set."
+        )
 
         return {self.OUTPUT: sink_id}
 
@@ -294,8 +309,8 @@ def execute_bed_assessment(
             pt.X = pt_geom.x()
             pt.Y = pt_geom.y()
         for attr, field, default in [
-            ("Q",       q_field,  0.0),
-            ("width",   w_field,  1.0),
+            ("Q", q_field, 0.0),
+            ("width", w_field, 1.0),
             ("wslidar", ws_field, 0.0),
         ]:
             try:
