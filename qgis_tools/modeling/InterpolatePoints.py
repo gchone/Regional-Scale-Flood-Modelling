@@ -13,7 +13,7 @@ from qgis.core import (
     QgsWkbTypes,
     QgsProcessing,
 )
-from qgis.PyQt.QtCore import QMetaType
+from qgis.PyQt.QtCore import QMetaType, QVariant
 
 
 class InterpolatePoints(QgsProcessingAlgorithm):
@@ -173,7 +173,8 @@ class InterpolatePoints(QgsProcessingAlgorithm):
         for feat in pts_layer.getFeatures():
             d = {}
             for f in pts_layer.fields().names():
-                d[f] = feat[f]
+                val = feat[f]
+                d[f] = None if isinstance(val, QVariant) or (hasattr(val, 'isNull') and val.isNull()) else val
             data_points.append(d)
 
         # Load target points
@@ -181,7 +182,8 @@ class InterpolatePoints(QgsProcessingAlgorithm):
         for feat in targets_layer.getFeatures():
             d = {}
             for f in targets_layer.fields().names():
-                d[f] = feat[f]
+                val = feat[f]
+                d[f] = None if isinstance(val, QVariant) or (hasattr(val, 'isNull') and val.isNull()) else val
             if feat.geometry() and not feat.geometry().isEmpty():
                 pt = feat.geometry().asPoint()
                 d["X"] = pt.x()
@@ -382,17 +384,19 @@ def interpolate_points(
             else:
                 left_right = float(extrapolation_value)
 
-            x_data = np.array([float(p[pts_dist]) for p in sorted_data])
-            x_targets = np.array([float(p[tgt_dist]) for p in t_pts])
-
             for t_pt in t_pts:
                 result = dict(t_pt)
                 if len(sorted_data) > 0:
                     x_t = float(t_pt[tgt_dist])
                     for field in data_fields:
-                        y_data = np.array([float(p.get(field, 0) or 0) for p in sorted_data])
-                        val = float(np.interp(x_t, x_data, y_data,
-                                              left=left_right, right=left_right))
+                        valid_data = [p for p in sorted_data if p.get(field) is not None]
+                        if valid_data:
+                            x_data = np.array([float(p[pts_dist]) for p in valid_data])
+                            y_data = np.array([float(p[field]) for p in valid_data])
+                            val = float(np.interp(x_t, x_data, y_data,
+                                                  left=left_right, right=left_right))
+                        else:
+                            val = float(extrapolation_value) if extrapolation_value is not None else None
                         result[field] = val
                 else:
                     for field in data_fields:
