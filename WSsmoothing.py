@@ -199,7 +199,7 @@ def rdp_simplify_and_resample(listcs, epsilon=0.03):
     return listcs
 
 
-def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True, rdp_epsilon=None):
+def execute_WSprocessing(network_shp, links_table, RID_field, order_field, datapoints, id_field_pts, RID_field_pts, Distance_field_pts, dem_forws_field, DEM_ID_field, output_points, messages, quantile=0.2, smooth_level=600 , uncertainty_sigma = 300, uncertainty_factor=0.85, slope_sigma=300, slope_factor=2.0, smoothing=True, rdp_epsilon=0.02):
 
     # The process:
     # - Removes bumps in the water surface profile following the quantile carving process of

@@ -123,6 +123,12 @@ class WSsmoothing(object):
             datatype="GPDouble",
             parameterType="Required",
             direction="Input")
+        param_rdp = arcpy.Parameter(
+            displayName="Water surface simplification by the Ramer-Douglas-Peucker algorithm",
+            name="rdp_value",
+            datatype="GPDouble",
+            parameterType="Optional",
+            direction="Input")
         param_output_table = arcpy.Parameter(
             displayName="Output Points table",
             name="output_table",
@@ -144,11 +150,12 @@ class WSsmoothing(object):
         param_uncertainty_factor.value = 0.85
         param_slope_sigma.value = 300
         param_slope_factor.value = 2.0
+        param_rdp = 0.02
 
         params = [param_routes, param_links, param_RID_field, param_order_field, param_points, param_pts_id_field,
                   param_pts_rid_field, param_pts_distfield, param_pts_wsfield, param_pts_demfield, param_quantile,
                   param_smoothing, param_smooth_level, param_uncertainty_sigma, param_uncertainty_factor,
-                  param_slope_sigma, param_slope_factor, param_output_table]
+                  param_slope_sigma, param_slope_factor, param_rdp, param_output_table]
 
 
         return params
@@ -194,7 +201,8 @@ class WSsmoothing(object):
         uncertainty_factor = float(parameters[14].valueAsText)
         slope_sigma = float(parameters[15].valueAsText)
         slope_factor = float(parameters[16].valueAsText)
-        output_table = parameters[17].valueAsText
+        rdp = float(parameters[17].valueAsText) if parameters[17].valueAsText else None
+        output_table = parameters[18].valueAsText
 
 
         execute_WSprocessing(routes, links, RID_field, order_field, datapoints, id_field_pts,
@@ -202,7 +210,7 @@ class WSsmoothing(object):
                             DEMs_field_pts, output_table, messages, quantile = quantile,
                              smooth_level = smooth_level, uncertainty_sigma = uncertainty_sigma,
                              uncertainty_factor = uncertainty_factor, slope_sigma = slope_sigma,
-                             slope_factor = slope_factor, smoothing= smoothing)
+                             slope_factor = slope_factor, smoothing= smoothing, rdp_epsilon = rdp)
 
 
         return
