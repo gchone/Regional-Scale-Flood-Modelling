@@ -21,7 +21,7 @@ from Simple1Dhydraulic import *
 
 def execute_BedAssessment(route: object, route_RID_field: object, route_order_field: object, routelinks: object, points: object, points_IDfield: object,
                           points_RIDfield: object, points_distfield: object, points_Qfield: object, points_Wfield: object, points_WSfield: object,
-                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "OVERSAMPLING", supercritical=False, max_delta_y = None) -> None:
+                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "2-XS", supercritical=False, max_delta_y = 40) -> None:
 
     ## Two methods are available:
     # SIMPLE: Each cross-section is processed individually (no particular extra-process)
