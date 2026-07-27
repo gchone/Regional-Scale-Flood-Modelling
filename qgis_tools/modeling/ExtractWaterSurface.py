@@ -421,7 +421,7 @@ def extract_water_surface(
             d[dem_id_field] = None
             test_geom = QgsGeometry.fromPointXY(QgsPointXY(pt.x(), pt.y()))
             for dem_feat in dem_feats:
-                if dem_feat.geometry().contains(test_geom):
+                if dem_feat.geometry().intersects(test_geom):
                     d[dem_id_field] = dem_feat[dem_id_field]
                     break
         target_pts_data.append(d)
