@@ -2,9 +2,13 @@ import warnings
 warnings.simplefilter("ignore", RuntimeWarning)
 from scipy.optimize import fsolve, minimize_scalar
 g = 9.81
-
 def manning_solver(cs):
+    if cs.Q is None or cs.Q <= 0 or cs.width is None or cs.width <= 0:
+        cs.y = cs.R = cs.v = cs.z = cs.h = cs.s = cs.Fr = None
+        return
     def equations(y):
+        if y <= 0:
+            return 1e6
         R = (cs.width * y) / (cs.width + 2 * y)
         return (y * cs.width * R ** (2. / 3.) * cs.s ** 0.5) / cs.n - cs.Q
     cs.y  = fsolve(equations, 1)[0]
@@ -13,10 +17,15 @@ def manning_solver(cs):
     cs.z  = cs.wslidar - cs.y
     cs.h  = cs.wslidar + cs.v ** 2 / (2 * g)
     cs.Fr = cs.v / (g * cs.y) ** 0.5
-
 def cs_solver(cs_up, cs_down, min_slope):
     cs_tosolve = cs_down
     cs_ref     = cs_up
+    if cs_tosolve.Q is None or cs_tosolve.Q <= 0 or cs_tosolve.width is None or cs_tosolve.width <= 0:
+        cs_tosolve.y = cs_tosolve.R = cs_tosolve.v = cs_tosolve.z = cs_tosolve.h = cs_tosolve.s = cs_tosolve.Fr = None
+        return None
+    if cs_up.h is None:
+        cs_tosolve.y = cs_tosolve.R = cs_tosolve.v = cs_tosolve.z = cs_tosolve.h = cs_tosolve.s = cs_tosolve.Fr = None
+        return None
     if cs_down.reach == cs_up.reach:
         localdist = float(cs_up.dist - cs_down.dist)
     else:
@@ -31,7 +40,6 @@ def cs_solver(cs_up, cs_down, min_slope):
     else:
         h_ref = cs_up.h
     cs_tosolve.ycrit = (cs_tosolve.Q / (cs_tosolve.width * g ** 0.5)) ** (2. / 3.)
-
     def equations(y):
         if y < cs_tosolve.ycrit:
             return float('inf')
@@ -40,11 +48,7 @@ def cs_solver(cs_up, cs_down, min_slope):
         s = (cs_tosolve.n ** 2 * v ** 2) / (R ** (4. / 3.))
         h = cs_tosolve.wslidar + v ** 2 / (2 * g)
         return abs(localdist * s + h - h_ref)
-    y_lo = cs_tosolve.ycrit * 1.001
-    y_hi = y_lo * 2.0
-    res = minimize_scalar(
-        equations, method='brent', bracket=(y_lo, y_hi), tol=1e-3,
-    )
+    res = minimize_scalar(equations, method='brent', tol=1e-3)
     cs_tosolve.y  = res.x
     cs_tosolve.R  = (cs_tosolve.width * cs_tosolve.y) / (cs_tosolve.width + 2 * cs_tosolve.y)
     cs_tosolve.v  = cs_tosolve.Q / (cs_tosolve.width * cs_tosolve.y)

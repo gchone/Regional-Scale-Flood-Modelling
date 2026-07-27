@@ -183,6 +183,8 @@ class BedAssessment(QgsProcessingAlgorithm):
             if lyr is None:
                 raise QgsProcessingException(f"{name} layer is invalid")
 
+        _check_no_nulls(points, q_field, w_field, ws_field, dem_field)
+
         results = execute_bed_assessment(
             routes=routes,
             rid_field=rid_field,
@@ -202,7 +204,10 @@ class BedAssessment(QgsProcessingAlgorithm):
         )
 
         out_fields = QgsFields()
+        DROP_FIELDS = {"lidar3m_forws", "zws_quantilecarving"}
         for f in points.fields():
+            if f.name() in DROP_FIELDS:
+                continue
             out_fields.append(f)
         for fname, ftype in [
             ("solver", QMetaType.QString),
@@ -394,6 +399,31 @@ def execute_bed_assessment(
     output_fields = list(points_layer.fields().names()) + [
         "solver", "y", "R", "v", "z", "h", "s", "Fr"
     ]
+
+    for pt in points_coll._points.values():
+        if getattr(pt, "X", None) is not None and getattr(pt, "Y", None) is not None:
+            continue
+        geom = pt.reach.feature.geometry()
+        interp_pt = geom.interpolate(pt.dist)
+        if interp_pt and not interp_pt.isEmpty():
+            xy = interp_pt.asPoint()
+            pt.X = xy.x()
+            pt.Y = xy.y()
+
+    for pt in points_coll._points.values():
+        if getattr(pt, w_field, None) is None:
+            setattr(pt, w_field, getattr(pt, "width", None))
+        if getattr(pt, q_field, None) is None:
+            setattr(pt, q_field, getattr(pt, "Q", None))
+        if getattr(pt, ws_field, None) is None:
+            setattr(pt, ws_field, getattr(pt, "wslidar", None))
+        if getattr(pt, dem_field, None) is None:
+            setattr(pt, dem_field, getattr(pt, "DEM", None))
+        if getattr(pt, rid_field_pts, None) is None:
+            setattr(pt, rid_field_pts, pt.reach.id)
+        if getattr(pt, dist_field, None) is None:
+            setattr(pt, dist_field, pt.dist)
+
     results = [{**{f: getattr(pt, f, None) for f in output_fields},
                 "X": getattr(pt, "X", None),
                 "Y": getattr(pt, "Y", None)}
@@ -410,7 +440,11 @@ def execute_bed_assessment(
 # =============================================================================
 
 def _recursive_inverse_1d(cs, prev_cs, min_slope, points_coll):
-    cs_solver(prev_cs, cs, min_slope)
+    res = cs_solver(prev_cs, cs, min_slope)
+
+    if res is not None and not res.success:
+        cs.solver = "error"
+        cs.type = -999
 
     localdist = (
         prev_cs.dist - cs.dist if cs.reach == prev_cs.reach
@@ -447,3 +481,20 @@ def _recursive_inverse_1d(cs, prev_cs, min_slope, points_coll):
         _recursive_inverse_1d(newcs, prev_cs, min_slope, points_coll)
         newcs.type = 3
         _recursive_inverse_1d(cs, newcs, min_slope, points_coll)
+
+def _check_no_nulls(points_layer, q_field, w_field, ws_field, dem_field, nodata_values=(-999,)):
+    fields_to_check = [q_field, w_field, ws_field, dem_field]
+    null_counts = {f: 0 for f in fields_to_check}
+    for feat in points_layer.getFeatures():
+        for field in fields_to_check:
+            val = feat[field]
+            if val is None or val in nodata_values:
+                null_counts[field] += 1
+    bad_fields = {f: n for f, n in null_counts.items() if n > 0}
+    if bad_fields:
+        detail = "; ".join(f"'{f}': {n} NoData value(s)" for f, n in bad_fields.items())
+        raise QgsProcessingException(
+            f"Bed Assessment cannot run: the points layer contains NoData in "
+            f"required field(s) — {detail}. Resolve these values (e.g. exclude "
+            f"or fill the affected points) before re-running."
+        )
