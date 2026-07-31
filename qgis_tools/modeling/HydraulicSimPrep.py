@@ -21,6 +21,8 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
 
     FLOWDIR       = "FLOWDIR"
     FLOWACC       = "FLOWACC"
+    DISTOUTPUT    = "DISTOUTPUT"
+    PERCENT       = "PERCENT"
     ZONES_FOLDER  = "ZONES_FOLDER"
     DEM           = "DEM"
     WIDTH         = "WIDTH"
@@ -33,7 +35,7 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         return "hydraulicsimprep"
 
     def displayName(self):
-        return "Hydraulic simulation preparation"
+        return "Hydraulic simulations preparation"
 
     def group(self):
         return "ConcordiaRiverLab-FloodTools: Modeling"
@@ -46,7 +48,7 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
 
     def shortHelpString(self):
         return (
-            "Hydraulic simulation preparation\n\n"
+            "Hydraulic simulations preparation\n\n"
             "Creates LISFLOOD-FP input files for each tile: clips the DEM to each "
             "zone's bounding-box envelope, traces the flow path from each zone's "
             "source point to find the exit point and detect lateral inflow points, "
@@ -54,7 +56,9 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             "elevation, Manning's n, and channel mask rasters to ASCII for LISFLOOD.\n\n"
             "Inputs:\n"
             "- Flow direction: watershed-scale D8 flow direction raster (e.g. Lisflood_inputs\\lidar10m_fd)\n"
-            "- Flow accumulation: watershed-scale flow accumulation raster (g.g. Lisflood_inputs\\lidar10m_facc)\n"
+            "- Flow accumulation: watershed-scale flow accumulation raster (e.g. Lisflood_inputs\\lidar10m_facc)\n"
+            "- Downstream boundary condition width (m): total width of the exit window used to set the downstream boundary condition (default 4000)\n"
+            "- Drainage area variation for discharge correction (%): flow accumulation increase threshold used to detect lateral inflow points (default 1)\n"
             "- Tiles folder: folder containing polyzones.gpkg and sourcepoints.gpkg "
             "(from the Tiling tool); zone{N}.tif rasters are also written here\n"
             "- DEM: watershed-scale DEM (e.g. lidar10m_avg)\n"
@@ -78,6 +82,16 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         ))
         self.addParameter(QgsProcessingParameterRasterLayer(
             self.FLOWACC, "Flow accumulation (lidar10m_facc)",
+        ))
+        self.addParameter(QgsProcessingParameterNumber(
+            self.DISTOUTPUT, "Downstream boundary condition width (m)",
+            type=QgsProcessingParameterNumber.Integer,
+            defaultValue=4000,
+        ))
+        self.addParameter(QgsProcessingParameterNumber(
+            self.PERCENT, "Drainage area variation for discharge correction (%)",
+            type=QgsProcessingParameterNumber.Double,
+            defaultValue=1.0,
         ))
         self.addParameter(QgsProcessingParameterFile(
             self.ZONES_FOLDER, r"Tiles folder (polyzones.gpkg, sourcepoints.gpkg) (Tiles\)",
@@ -111,8 +125,8 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         zbed          = self.parameterAsRasterLayer(parameters, self.ZBED, context)
         manning       = self.parameterAsRasterLayer(parameters, self.MANNING, context)
         mask          = self.parameterAsRasterLayer(parameters, self.MASK, context)
-        distoutput = 4000  # boundary condition exit window width (m)
-        percent = 1.0  # drainage area variation threshold (%) for lateral inflow detection
+        distoutput = self.parameterAsInt(parameters, self.DISTOUTPUT, context)
+        percent = self.parameterAsDouble(parameters, self.PERCENT, context)
         output_folder = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
 
         if not all([flowdir, flowacc, dem, width, zbed, manning, mask]):
@@ -300,6 +314,7 @@ def prepare_hydraulic_sim(
     envelopezones_path = os.path.join(zones_folder, "envelopezones.gpkg")
     envelopezones_fields = QgsFields()
     envelopezones_fields.append(QgsField("GRID_CODE", QVariant.Int))
+    envelopezones_fields.append(QgsField("Lake_ID", QVariant.Int))
 
     envelopezones_options = QgsVectorFileWriter.SaveVectorOptions()
     envelopezones_options.driverName = "GPKG"
@@ -320,6 +335,7 @@ def prepare_hydraulic_sim(
         if feedback and feedback.isCanceled():
             break
         zone_id = int(feat["GRID_CODE"])
+        lake_id = feat["Lake_ID"]
         ext = feat.geometry().boundingBox()
         extent = (ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum())
         zone_extents[zone_id] = extent
@@ -327,7 +343,7 @@ def prepare_hydraulic_sim(
 
         env_feat = QgsFeature(envelopezones_fields)
         env_feat.setGeometry(QgsGeometry.fromRect(ext))
-        env_feat.setAttributes([zone_id])
+        env_feat.setAttributes([zone_id, lake_id])
         envelopezones_writer.addFeature(env_feat)
 
     del envelopezones_writer
