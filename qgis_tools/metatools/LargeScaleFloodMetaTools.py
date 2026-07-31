@@ -534,7 +534,7 @@ def spatialize_q_from_gauging_stations(
                 test_geom      = QgsGeometry.fromPointXY(QgsPointXY(float(pt["X"]), float(pt["Y"])))
                 pt[dem_id_field] = None
                 for dem_feat in dem_feats:
-                    if dem_feat.geometry().contains(test_geom) or dem_feat.geometry().distance(test_geom) == 0.0:
+                    if dem_feat.geometry().intersects(test_geom):
                         pt[dem_id_field] = dem_feat[dem_id_field]
                         break
 
