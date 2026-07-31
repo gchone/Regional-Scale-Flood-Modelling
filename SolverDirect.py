@@ -31,15 +31,12 @@ def manning_solver(cs):
     cs.solver = "manning"
 
 
-def cs_solver(cs, min_slope, method, supercritical, max_delta_y, working_supercritical):
+def cs_solver(cs, min_slope, method, max_delta_y):
     # This function is an inverse 1D hydraulic solver, using Manning's and Bernoulli's equations to computed flow at a
     # downstream cross-section, knowing the conditions upstream
     # Inverse problem version (i.e. given ws, find z)
     # cs has listtosolve as an attribute, with a list of adjacent cross-section, from upstream to downstream. In the current implementation, this list
-    # always has a length of 3, with the assessed cross-section in the middle. Depending if the solver is solving for
-    # subcritical or supercritical flow, the one already known is either the first or the last, respectively.
-    # Attribute supercritical indicates if the supercritical flow are computed for bed estimation
-    # Attribute working_supercritical indicates if the supercritical flow is currently being solved
+    # always has a length of 3, with the assessed cross-section in the middle, and the one already known being the first.
     # Atttribute max_delta_y: maximum increase of water depth per meter. e.g: 40 -> max +200% of water depth for 5m spaced
     #   cross-section (compared to the upstream cross-section). This is used to avoid convergence to unrealistic
     #   solutions in case of steep slopes, when the solver is not working properly (in 2-XS mode).
@@ -53,35 +50,31 @@ def cs_solver(cs, min_slope, method, supercritical, max_delta_y, working_supercr
         # elevation, plus kinetic energy, plus energy loss by friction) and the energy computed upstream is computed.
         # This function is used by minimize, that tries to find y so that dif_energy is minimal
 
-        if working_supercritical:
-            localdist = cs.localdist_down
-        else:
-            localdist = cs.localdist_up
-
         dif_energy = []
         for i in range(len(cs.listtosolve) - 1):
-            if working_supercritical:
-                cs_tosolve = cs.listtosolve[len(cs.listtosolve) - 1 - i]
-                cs_ref = cs.listtosolve[len(cs.listtosolve) - 2 - i]
-            else:
-                cs_tosolve = cs.listtosolve[i + 1]
-                cs_ref = cs.listtosolve[i]
+
+            cs_tosolve = cs.listtosolve[i + 1]
+            cs_ref = cs.listtosolve[i]
+            localdist = cs_tosolve.localdist_up
+            if i == 0:
+                cs_ref.temp_h = cs_ref.h
+                cs_ref.temp_s = cs_ref.s
             if abs(cs_ref.wslidar - cs_tosolve.wslidar) / localdist <= min_slope:
                 cs_tosolve.solver = "min_slope"
-                h_ref = cs_ref.h + localdist * (
+                h_ref = cs_ref.temp_h + localdist * (
                         min_slope - (cs_ref.wslidar - cs_tosolve.wslidar) / localdist)
             else:
-                h_ref = cs_ref.h
+                h_ref = cs_ref.temp_h
 
             v = cs_tosolve.Q / (cs_tosolve.width * y[i])
             R = (cs_tosolve.width * y[i]) / (cs_tosolve.width + 2 * y[i])
             s = (cs_tosolve.n ** 2 * v ** 2) / (R ** (4. / 3.))
             h = cs_tosolve.wslidar
             h = h + v ** 2 / (2 * g)  # add kinetic energy
-            cs_tosolve.h = h
-            cs_tosolve.s = s
+            cs_tosolve.temp_h = h
+            cs_tosolve.temp_s = s
             # slope calculation:
-            friction_h = localdist * (s + cs_ref.s) / 2.
+            friction_h = localdist * (s + cs_ref.temp_s) / 2.
             if len(cs.listtosolve) - 1 == 1:
                 # Friction is based and the downstream computed slope only if depth = 1 (necessary for convergence)
                 friction_h = localdist * s
@@ -107,61 +100,39 @@ def cs_solver(cs, min_slope, method, supercritical, max_delta_y, working_supercr
         # print(misfit)
         return misfit
 
-    # If supercritical is True, then the inverse hydraulic model is run once from up to down (subcritical flow),
-    # then another time from down to up (supercritical flow, working_supercritical = True), and the best fit is retained.
-    # If supercritical is False, only the subcritical flow is computed, but if the supercritical flow is not to be
-    # properly computed, it is estimated nevertheless in reverse, and if it's a better fit the critical depth is
-    if not working_supercritical:
-        # Compute the critical depth at each cross-section
-        for i in range(len(cs.listtosolve) - 1):
-            cs_down = cs.listtosolve[i + 1]
-            # the solver starts at y = y_crit
-            cs_down.ycrit = (cs_down.Q / (cs_down.width * g ** 0.5)) ** (2. / 3.)
-        # Find the best fit between critical depth and maximum allowed depth
-        ycrit = [cs.listtosolve[i + 1].ycrit for i in range(len(cs.listtosolve) - 1)]     # initial guess
-        if max_delta_y is not None:
-            max_y = [max(cs.listtosolve[1].ycrit,min(cs.listtosolve[0].y*max_delta_y*cs.localdist_up/100., cs.listtosolve[1].width))]
-        else:
-            max_y = [max(cs.listtosolve[1].ycrit, cs.listtosolve[1].width)]
-        max_y.extend([cs.listtosolve[i + 1].width for i in range(1, len(cs.listtosolve) - 1)])
-        bounds = [(cs.listtosolve[i + 1].ycrit,  max_y[i]) for i in range(len(cs.listtosolve) - 1)]
-        res = minimize(equations, ycrit, method='Nelder-Mead',
-                       bounds=bounds, options={'xatol': 1e-3, 'fatol': 1e-6})
-        cs.solver = "regular"
-        if max_delta_y is not None and res.x[cs.position_in_list - 1] == cs.listtosolve[0].y*max_delta_y*cs.localdist_up/100.:
-            cs.solver = "max depth gradient"
-        if res.x[cs.position_in_list - 1] == cs.listtosolve[1].width:
-            cs.solver = "max depth"
+    # Only the subcritical flow is computed, but the supercritical estimated nevertheless in reverse, and if it's a
+    # better fit the critical depth is
 
-        if not supercritical:
-            # if the supercritical flow is not to be properly computed, it is estimated nevertheless in reverse, and
-            # if it's a better fit the critical depth is retained as the final answer
-            bounds = [(0, cs.listtosolve[i + 1].ycrit) for i in range(len(cs.listtosolve) - 1)]
-            res_super = minimize(equations, ycrit, method='Nelder-Mead',
-                           bounds=bounds, options={'xatol': 1e-3, 'fatol': 1e-6})
-
-            res = min([res, res_super] , key=lambda r: r.fun)
-        else:
-            cs.opti_res_subc = res
+    # Compute the critical depth at each cross-section
+    for i in range(len(cs.listtosolve) - 1):
+        cs_down = cs.listtosolve[i + 1]
+        # the solver starts at y = y_crit
+        cs_down.ycrit = (cs_down.Q / (cs_down.width * g ** 0.5)) ** (2. / 3.)
+    # Find the best fit between critical depth and maximum allowed depth
+    ycrit = [cs.listtosolve[i + 1].ycrit for i in range(len(cs.listtosolve) - 1)]     # initial guess
+    if max_delta_y is not None:
+        max_y = [max(cs.listtosolve[1].ycrit,min(cs.listtosolve[0].y*(1 + max_delta_y*cs.localdist_up/100.), cs.listtosolve[1].width))]
     else:
-        # Find the best fit for supercritical flow
-        for i in range(len(cs.listtosolve) - 1):
-            cs_down = cs.listtosolve[len(cs.listtosolve) - 1 - i]
-            # the solver starts at y = y_crit
-            cs_down.ycrit = (cs_down.Q / (cs_down.width * g ** 0.5)) ** (2. / 3.)
-        ycrit = [cs.listtosolve[len(cs.listtosolve) - 1 - i].ycrit for i in range(len(cs.listtosolve) - 1)]  # initial guess
-        bounds = [(0, cs.listtosolve[len(cs.listtosolve) - 1 - i].ycrit) for i in
-                  range(len(cs.listtosolve) - 1)]
-        res_superc = minimize(equations, ycrit, method='Nelder-Mead',
-                       bounds=bounds, options={'xatol': 1e-3, 'fatol': 1e-6})
-        if cs.opti_res_subc.fun < res_superc.fun:
-            res = cs.opti_res_subc
-        else:
-            res = res_superc
-            cs.solver = "supercritical"
+        max_y = [max(cs.listtosolve[1].ycrit, cs.listtosolve[1].width)]
+    max_y.extend([cs.listtosolve[i + 1].width for i in range(1, len(cs.listtosolve) - 1)])
+    bounds = [(cs.listtosolve[i + 1].ycrit,  max_y[i]) for i in range(len(cs.listtosolve) - 1)]
+    res = minimize(equations, ycrit, method='Nelder-Mead',
+                   bounds=bounds, options={'xatol': 1e-3, 'fatol': 1e-6})
+    cs.solver = "regular"
+    if max_delta_y is not None and res.x[cs.position_in_list - 1] == cs.listtosolve[0].y*max_delta_y*cs.localdist_up/100.:
+        cs.solver = "max depth gradient"
+    if res.x[cs.position_in_list - 1] == cs.listtosolve[1].width:
+        cs.solver = "max depth"
+
+    # Supercritical estimation
+    bounds = [(0, cs.listtosolve[i + 1].ycrit) for i in range(len(cs.listtosolve) - 1)]
+    res_super = minimize(equations, ycrit, method='Nelder-Mead',
+                   bounds=bounds, options={'xatol': 1e-3, 'fatol': 1e-6})
+
+    res = min([res, res_super] , key=lambda r: r.fun)
 
     cs.y = res.x[cs.position_in_list - 1]
-    if not supercritical and cs.y < cs.ycrit:
+    if cs.y < cs.ycrit:
         cs.y = cs.ycrit
         cs.solver = "critical"
 

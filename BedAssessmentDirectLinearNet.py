@@ -21,7 +21,7 @@ from Simple1Dhydraulic import *
 
 def execute_BedAssessment(route: object, route_RID_field: object, route_order_field: object, routelinks: object, points: object, points_IDfield: object,
                           points_RIDfield: object, points_distfield: object, points_Qfield: object, points_Wfield: object, points_WSfield: object,
-                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "2-XS", supercritical=False, max_delta_y = 40) -> None:
+                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "2-XS", max_delta_y = 40) -> None:
 
     ## Two methods are available:
     # SIMPLE: Each cross-section is processed individually (no particular extra-process)
@@ -120,23 +120,10 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
                         SolverDirect.manning_solver(cs)
                     else:
                         # For any other point, use the regular inverse hydraulic solver
-                        __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, supercritical, max_delta_y)
+                        __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, max_delta_y)
                 prev_cs = cs
             done_reaches.append(reach)
 
-    if supercritical:
-        # 1D hydraulic calculations, from downstream to upstream. Process main stream first (based on discharge).
-        for reach in rivernet.browse_reaches_down_to_up(prioritize_reach_attribute="order"):
-            # Looking for the downstream datapoint
-            if reach.is_downstream_end():
-                prev_cs = None
-            # no else: if it's not a downstream reach the prev_cs is already good
-
-            for cs in reach.browse_points(points_coll, orientation="DOWN_TO_UP"):
-                if prev_cs != None and (prev_cs.DEM == cs.DEM) and cs.solver != "manning" and cs.solver != "manning up":
-                    SolverDirect.cs_solver(cs, min_slope, method, supercritical, max_delta_y, True)
-                prev_cs = cs
-            done_reaches.append(reach)
 
 
     points_coll.add_SavedVariable("solver", "str", 10)
@@ -291,9 +278,9 @@ def execute_PostSmoothing(route, route_RID_field, route_order_field, routelinks,
 
     return
 
-def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, supercritical, max_delta_y, working_supercritical=False, ):
+def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, max_delta_y):
 
-    flag = SolverDirect.cs_solver(cs, min_slope, method, supercritical, max_delta_y, working_supercritical)
+    flag = SolverDirect.cs_solver(cs, min_slope, method, max_delta_y)
     if not flag.success:
         # The solver issued a warning
         # It's usually because no solution was found
@@ -305,29 +292,18 @@ def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, supercr
 
     localdist = cs.localdist_up
     if method=="OVERSAMPLING" and abs(cs.Fr - prev_cs.Fr) / prev_cs.Fr > 0.5 and localdist > 0.1: # Minimum 10cm between cs
-        if not working_supercritical:
-            if cs.reach == prev_cs.reach:
-                newcs = cs.reach.add_point((cs.dist + prev_cs.dist) / 2., cs.points_collection)
-            else:
-                # case where the interpolation takes place between two reaches
-                if localdist / 2. < prev_cs.dist:
-                    # point is in the upstream reach (prev_cs reach)
-                    newcs = prev_cs.reach.add_point(localdist / 2., cs.points_collection)
 
-                else:
-                    newcs = cs.reach.add_point(cs.dist + localdist / 2., cs.points_collection)
+        if cs.reach == prev_cs.reach:
+            newcs = cs.reach.add_point((cs.dist + prev_cs.dist) / 2., cs.points_collection)
         else:
-            if cs.reach == prev_cs.reach:
-                newcs = cs.reach.add_point((cs.dist + prev_cs.dist) / 2., cs.points_collection)
-            else:
-                # case where the interpolation takes place between two reaches
-                if prev_cs.dist + localdist / 2. < prev_cs.reach.length:
-                    # point is in the downstream reach (prev_cs reach)
-                    newcs = prev_cs.reach.add_point(prev_cs.dist + localdist / 2., cs.points_collection)
+            # case where the interpolation takes place between two reaches
+            if localdist / 2. < prev_cs.dist:
+                # point is in the upstream reach (prev_cs reach)
+                newcs = prev_cs.reach.add_point(localdist / 2., cs.points_collection)
 
-                else:
-                    newcs = cs.reach.add_point(localdist / 2. - (prev_cs.reach.length - prev_cs.dist),
-                                               cs.points_collection)
+            else:
+                newcs = cs.reach.add_point(cs.dist + localdist / 2., cs.points_collection)
+
 
         # Linear interpolation of width, discharge and water surface.
         # Although more accurate spatialization could be done, this is deemed accurate enough
@@ -347,27 +323,18 @@ def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, supercr
         cs.listtosolve = [newcs, cs]
         cs.position_in_list = 1
 
-        if not working_supercritical:
-            cs.localdist_up = localdist / 2.
-            newcs.localdist_up = localdist / 2.
-            newcs.localdist_down = localdist / 2.
-            prev_cs.localdist_down = localdist / 2.
-            cs.listtosolve[0] = newcs
-            newcs.listtosolve = [prev_cs, newcs, cs]
-            prev_cs.listtosolve[-1] = newcs
-            newcs.position_in_list = 1
-        else:
-            cs.localdist_down = localdist / 2.
-            newcs.localdist_down = localdist / 2.
-            newcs.localdist_up = localdist / 2.
-            prev_cs.localdist_up = localdist / 2.
-            cs.listtosolve[-1] = newcs
-            newcs.listtosolve = [cs, newcs, prev_cs]
-            prev_cs.listtosolve[0] = newcs
-            newcs.position_in_list = 1
+        cs.localdist_up = localdist / 2.
+        newcs.localdist_up = localdist / 2.
+        newcs.localdist_down = localdist / 2.
+        prev_cs.localdist_down = localdist / 2.
+        cs.listtosolve[0] = newcs
+        newcs.listtosolve = [prev_cs, newcs, cs]
+        prev_cs.listtosolve[-1] = newcs
+        newcs.position_in_list = 1
 
-        __recursive_inverse1Dhydro(newcs, prev_cs, min_slope, messages, method, supercritical, working_supercritical)
-        __recursive_inverse1Dhydro(cs, newcs, min_slope, messages, method, supercritical, working_supercritical)
+
+        __recursive_inverse1Dhydro(newcs, prev_cs, min_slope, messages, method)
+        __recursive_inverse1Dhydro(cs, newcs, min_slope, messages, method)
 
     return
 
