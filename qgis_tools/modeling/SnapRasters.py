@@ -52,6 +52,9 @@ class SnapRasters(QgsProcessingAlgorithm):
             "all inputs will be snapped to\n"
             "- Output CRS (optional): if the input rasters have no CRS defined, "
             "specify it here so it is written to all output files\n"
+            "- Method: resampling method used when snapping — bilinear (default) for "
+            "continuous data like elevation, bed, or width; nearest neighbour for categorical "
+            "data like masks or manning's N rasters\n"
             "- Output location: directory where snapped rasters will be written\n\n"
             "Output:\n"
             "- Snapped rasters with cell edges aligned to the reference raster's grid\n"
@@ -72,7 +75,7 @@ class SnapRasters(QgsProcessingAlgorithm):
         ))
         self.addParameter(QgsProcessingParameterEnum(
             self.RESAMPLING, "Resampling method",
-            options=["bilinear", "nearest neighbour", "cubic"],
+            options=["bilinear", "nearest neighbour"],
             defaultValue=0,
         ))
         self.addParameter(QgsProcessingParameterFolderDestination(
@@ -131,7 +134,7 @@ def execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback, resampling=
     # ------------------------------------------------------------------
     # Snap each raster to reference grid using gdalwarp -te
     # ------------------------------------------------------------------
-    RESAMPLING_METHODS = {0: "bilinear", 1: "near", 2: "cubic"}
+    RESAMPLING_METHODS = {0: "bilinear", 1: "near"}
     resample_method = RESAMPLING_METHODS.get(resampling, "bilinear")
 
     total = len(rasters)
