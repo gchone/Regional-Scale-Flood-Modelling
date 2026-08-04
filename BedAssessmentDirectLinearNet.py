@@ -21,12 +21,14 @@ from Simple1Dhydraulic import *
 
 def execute_BedAssessment(route: object, route_RID_field: object, route_order_field: object, routelinks: object, points: object, points_IDfield: object,
                           points_RIDfield: object, points_distfield: object, points_Qfield: object, points_Wfield: object, points_WSfield: object,
-                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "2-XS", max_delta_y = 40) -> None:
+                          points_DEMfield: object, manning: object, min_slope: object, output_pts: object, messages: object, method: object = "OVERSAMPLING", max_delta_y = None, resample = False) -> None:
 
-    ## Two methods are available:
-    # SIMPLE: Each cross-section is processed individually (no particular extra-process)
-    # OVERSAMPLING: adding cross-sections when needed (default, depth parameter is not used)
-    # 2-XS: using a two cross-sections downstream to compute the bed elevation for the first one
+    ## Three methods are available:
+    # SIMPLE: Each cross-section is processed individually (no particular extra-process). Not accurate at weirs.
+    # OVERSAMPLING: adding cross-sections when needed (default, depth parameter is not used). Result is resampled to the
+    # original resolution is resample = True
+    # 2-XS: using a two cross-sections downstream to compute the bed elevation for the first one. Experimental. Successfully
+    # detects hydraulic points but with less accuracy than the oversampling method, even with resample = True.
 
     rivernet = RiverNetwork()
     rivernet.dict_attr_fields['id'] = route_RID_field
@@ -42,8 +44,6 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
     points_coll.dict_attr_fields['width'] = points_Wfield
     points_coll.dict_attr_fields['DEM'] = points_DEMfield
     points_coll.load_table(points)
-
-
 
     # First, prepare the list of cross-sections to use for each point. There are 3 cross-sections to add:
     # the point itself, its downstream point and its upstream one. Downstream point is only used if method = "2-XS".
@@ -87,6 +87,9 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
         lastpoint = reach.get_last_point(points_coll)
         for cs in reach.browse_points(points_coll):
             cs.n = manning
+            cs.original_cs = cs
+            cs.dist_to_original_cs = 0
+            cs.nearby_cs = [cs]
             if prev_cs is not None:
                 if cs.reach == prev_cs.reach:
                     cs.localdist_down = (cs.dist - prev_cs.dist)
@@ -102,6 +105,7 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
     # at confluences.
     stopper = BrowsingStopper()
     done_reaches = []
+    added_cs=[]
     for reach in rivernet.browse_reaches_up_to_down(prioritize_reach_attribute="order", stopper=stopper):
         # Looking for the upstream datapoint
         if reach.is_upstream_end():
@@ -120,7 +124,7 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
                         SolverDirect.manning_solver(cs)
                     else:
                         # For any other point, use the regular inverse hydraulic solver
-                        __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, max_delta_y)
+                        __recursive_inverse1Dhydro(cs, prev_cs, min_slope, added_cs, messages, method, max_delta_y)
                 prev_cs = cs
             done_reaches.append(reach)
 
@@ -134,6 +138,9 @@ def execute_BedAssessment(route: object, route_RID_field: object, route_order_fi
     points_coll.add_SavedVariable("h", "float")
     points_coll.add_SavedVariable("s", "float")
     points_coll.add_SavedVariable("Fr", "float")
+
+    if resample:
+        __resample_points_to_original_resolution(rivernet, points_coll, added_cs)
 
     temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
     points_coll.save_points(temp_outtable)
@@ -278,7 +285,29 @@ def execute_PostSmoothing(route, route_RID_field, route_order_field, routelinks,
 
     return
 
-def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, max_delta_y):
+
+def __resample_points_to_original_resolution(rivernet, points_coll, added_cs):
+
+    for reach in rivernet.browse_reaches_down_to_up():
+        for cs in reach.browse_points(points_coll):
+            if cs not in added_cs:
+                max_z_point = max(cs.nearby_cs, key=lambda related_cs: related_cs.z)
+                cs.z = max_z_point.z
+
+                if len(cs.nearby_cs) > 1:
+                    cs.y = None
+                    cs.R = None
+                    cs.v = None
+                    cs.h = None
+                    cs.s = None
+                    cs.Fr = None
+                    cs.solver = "Resampled"
+
+    for point in added_cs:
+        points_coll.delete_point(point)
+
+
+def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, added_cs, messages, method, max_delta_y):
 
     flag = SolverDirect.cs_solver(cs, min_slope, method, max_delta_y)
     if not flag.success:
@@ -332,9 +361,16 @@ def __recursive_inverse1Dhydro(cs, prev_cs, min_slope, messages, method, max_del
         prev_cs.listtosolve[-1] = newcs
         newcs.position_in_list = 1
 
+        if (prev_cs.dist_to_original_cs + newcs.localdist_up < cs.dist_to_original_cs + newcs.localdist_down):
+            newcs.dist_to_original_cs = prev_cs.dist_to_original_cs + newcs.localdist_up
+            newcs.original_cs = prev_cs.original_cs
+        else:
+            newcs.dist_to_original_cs = cs.dist_to_original_cs + newcs.localdist_down
+            newcs.original_cs = cs.original_cs
+        newcs.original_cs.nearby_cs.append(newcs)
+        added_cs.append(newcs)
 
-        __recursive_inverse1Dhydro(newcs, prev_cs, min_slope, messages, method)
-        __recursive_inverse1Dhydro(cs, newcs, min_slope, messages, method)
+        __recursive_inverse1Dhydro(newcs, prev_cs, min_slope, added_cs, messages, method, max_delta_y)
+        __recursive_inverse1Dhydro(cs, newcs, min_slope, added_cs, messages, method, max_delta_y)
 
     return
-
