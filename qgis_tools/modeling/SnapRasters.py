@@ -9,9 +9,9 @@ from qgis.core import (
     QgsProcessingParameterMultipleLayers,
     QgsProcessingParameterRasterLayer,
     QgsProcessingParameterCrs,
+    QgsProcessingParameterEnum,
     QgsProcessingParameterFolderDestination,
 )
-
 
 # =============================================================================
 # QgsProcessingAlgorithm
@@ -19,10 +19,11 @@ from qgis.core import (
 
 class SnapRasters(QgsProcessingAlgorithm):
 
-    INPUT_RASTERS    = "INPUT_RASTERS"
+    INPUT_RASTERS = "INPUT_RASTERS"
     REFERENCE_RASTER = "REFERENCE_RASTER"
-    CRS              = "CRS"
-    OUT_DIR          = "OUT_DIR"
+    CRS = "CRS"
+    RESAMPLING = "RESAMPLING"
+    OUT_DIR = "OUT_DIR"
 
     def name(self):
         return "snap_rasters"
@@ -69,20 +70,26 @@ class SnapRasters(QgsProcessingAlgorithm):
             "Output CRS (optional — assign if input rasters have no CRS defined)",
             optional=True,
         ))
+        self.addParameter(QgsProcessingParameterEnum(
+            self.RESAMPLING, "Resampling method",
+            options=["bilinear", "nearest neighbour", "cubic"],
+            defaultValue=0,
+        ))
         self.addParameter(QgsProcessingParameterFolderDestination(
             self.OUT_DIR, "Output location",
         ))
 
     def processAlgorithm(self, parameters, context, feedback):
-        rasters   = self.parameterAsLayerList(parameters, self.INPUT_RASTERS, context)
+        rasters = self.parameterAsLayerList(parameters, self.INPUT_RASTERS, context)
         ref_layer = self.parameterAsRasterLayer(parameters, self.REFERENCE_RASTER, context)
-        out_dir   = self.parameterAsString(parameters, self.OUT_DIR, context)
-        crs       = self.parameterAsCrs(parameters, self.CRS, context)
+        out_dir = self.parameterAsString(parameters, self.OUT_DIR, context)
+        crs = self.parameterAsCrs(parameters, self.CRS, context)
+        resampling = self.parameterAsEnum(parameters, self.RESAMPLING, context)
 
         if not rasters:
             raise QgsProcessingException("No rasters provided.")
 
-        execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback)
+        execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback, resampling=resampling)
 
         return {"OUTPUT_FOLDER": out_dir}
 
@@ -91,7 +98,7 @@ class SnapRasters(QgsProcessingAlgorithm):
 # Core logic
 # =============================================================================
 
-def execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback):
+def execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback, resampling=0):
 
     # ------------------------------------------------------------------
     # Read reference raster grid
@@ -124,6 +131,9 @@ def execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback):
     # ------------------------------------------------------------------
     # Snap each raster to reference grid using gdalwarp -te
     # ------------------------------------------------------------------
+    RESAMPLING_METHODS = {0: "bilinear", 1: "near", 2: "cubic"}
+    resample_method = RESAMPLING_METHODS.get(resampling, "bilinear")
+
     total = len(rasters)
 
     for i, lyr in enumerate(rasters):
@@ -151,7 +161,7 @@ def execute_snap_rasters(rasters, ref_layer, out_dir, crs, feedback):
             '-of', 'GTiff',
             '-te', str(ref_xmin), str(ref_ymin), str(ref_xmax), str(ref_ymax),
             '-tr', str(ref_res_x), str(ref_res_y),
-            '-r', 'bilinear',
+            '-r', resample_method,
             '-co', 'COMPRESS=LZW',
             '-co', 'TILED=YES',
         ]
