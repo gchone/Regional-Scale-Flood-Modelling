@@ -172,6 +172,8 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
 
     # Max size of the output window (m). Effective size is latter reduced to 1/4 of the perimeter of the zone, if smaller
     max_distoutput = 4000
+    # Maximum simulation time allowed for a single tile before abording
+    timeout = 7200
 
     str_inbci = str_zonefolder + "\\inbci.shp"
     str_outbci = str_zonefolder + "\\outbci.shp"
@@ -789,7 +791,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 result = subprocess.run(
                                     [str_lisfloodfolder + "\\lisflood.exe", "-steady", "-steadytol", steadytol,
                                      str_simfolder + "\\zone" + str(point[1]) + ".par"],
-                                    shell=True, cwd=str_simfolder, capture_output=True, text=True, timeout=3600
+                                    shell=True, cwd=str_simfolder, capture_output=True, text=True, timeout=timeout
                                 )
                                 if result.returncode != 0:
                                     log_message(filelog, "ERROR", f"LISFLOOD-FP failed for zone {point[1]}, sim {simname}. Return code: {result.returncode}")
