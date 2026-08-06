@@ -1,4 +1,5 @@
 import os
+import math
 
 from osgeo import gdal
 from qgis.core import (
@@ -14,14 +15,13 @@ from qgis.core import (
     QgsVectorFileWriter,
     QgsCoordinateTransformContext,
 )
-from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtCore import QMetaType
 
 
 class HydraulicSimPrep(QgsProcessingAlgorithm):
 
     FLOWDIR       = "FLOWDIR"
     FLOWACC       = "FLOWACC"
-    DISTOUTPUT    = "DISTOUTPUT"
     PERCENT       = "PERCENT"
     ZONES_FOLDER  = "ZONES_FOLDER"
     DEM           = "DEM"
@@ -57,7 +57,6 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             "Inputs:\n"
             "- Flow direction: watershed-scale D8 flow direction raster (e.g. Lisflood_inputs\\lidar10m_fd)\n"
             "- Flow accumulation: watershed-scale flow accumulation raster (e.g. Lisflood_inputs\\lidar10m_facc)\n"
-            "- Downstream boundary condition width (m): total width of the exit window used to set the downstream boundary condition (default 4000)\n"
             "- Drainage area variation for discharge correction (%): flow accumulation increase threshold used to detect lateral inflow points (default 1)\n"
             "- Tiles folder: folder containing polyzones.gpkg and sourcepoints.gpkg "
             "(from the Tiling tool); zone{N}.tif rasters are also written here\n"
@@ -65,8 +64,10 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             "- D4 width, D4 bed elevation, floodplain Manning's n, channel mask: (e.g. Lisflood_inputs\\widthD4, bed, n_floodplain, mask)"
             "rasters clipped per zone and converted to ASCII\n"
             "- Output folder: destination for .bci and ASCII files (Simulations\\sims)\n\n"
-            "NB: for small tiles, check the resulting .bci files — the exit window "
-            "may incorrectly extend onto the upstream side of the reach.\n"
+            "The downstream boundary condition (exit window into each tile's .bci "
+            "file) is no longer computed here — it's computed at run time by Run "
+            "Hydraulic Simulations, using the already-simulated downstream tile's "
+            "actual result raster.\n"
         )
 
     def initAlgorithm(self, config=None):
@@ -82,11 +83,6 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         ))
         self.addParameter(QgsProcessingParameterRasterLayer(
             self.FLOWACC, "Flow accumulation (lidar10m_facc)",
-        ))
-        self.addParameter(QgsProcessingParameterNumber(
-            self.DISTOUTPUT, "Downstream boundary condition width (m)",
-            type=QgsProcessingParameterNumber.Integer,
-            defaultValue=4000,
         ))
         self.addParameter(QgsProcessingParameterNumber(
             self.PERCENT, "Drainage area variation for discharge correction (%)",
@@ -125,7 +121,6 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         zbed          = self.parameterAsRasterLayer(parameters, self.ZBED, context)
         manning       = self.parameterAsRasterLayer(parameters, self.MANNING, context)
         mask          = self.parameterAsRasterLayer(parameters, self.MASK, context)
-        distoutput = self.parameterAsInt(parameters, self.DISTOUTPUT, context)
         percent = self.parameterAsDouble(parameters, self.PERCENT, context)
         output_folder = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
 
@@ -145,7 +140,6 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             zbed_path=zbed.source(),
             manning_path=manning.source(),
             mask_path=mask.source(),
-            distoutput=distoutput,
             percent=percent,
             output_folder=output_folder,
             crs=flowdir.crs(),
@@ -216,18 +210,47 @@ def _check_raster_match(gt_a, array_a, gt_b, array_b, name_a, name_b, tol=1e-6):
         )
 
 
+def _snap_bounds_to_source_grid(src_gt, x_res, y_res, extent):
+    """Snaps extent outward to the SOURCE raster's own pixel grid — not an
+    arbitrary absolute-origin grid — so the clipped output's cell boundaries
+    correspond to real source pixels and extend no further than the minimum
+    needed to fully cover the requested extent. (A majority-area trim was
+    tried here and reverted — it moved the output further from ArcGIS's own
+    Clip_management reference behavior, dropping the exact-match rate from
+    48/62 to 38/62 zones, so plain outward snapping is kept instead.)"""
+    xmin, ymin, xmax, ymax = extent
+    origin_x, origin_y = src_gt[0], src_gt[3]
+
+    snapped_xmin = origin_x + math.floor((xmin - origin_x) / x_res) * x_res
+    snapped_xmax = origin_x + math.ceil((xmax - origin_x) / x_res) * x_res
+
+    # origin_y is the source's top edge; grid lines sit at origin_y - k*y_res
+    k_top = math.floor((origin_y - ymax) / y_res)
+    snapped_ymax = origin_y - k_top * y_res
+    k_bottom = math.ceil((origin_y - ymin) / y_res)
+    snapped_ymin = origin_y - k_bottom * y_res
+
+    return snapped_xmin, snapped_ymin, snapped_xmax, snapped_ymax
+
+
 def _clip_to_extent(input_path, extent, output_path, nodata=-9999):
-    """extent: (xmin, ymin, xmax, ymax)"""
+    """extent: (xmin, ymin, xmax, ymax). Snaps to the source raster's own
+    pixel grid rather than gdal.Warp's targetAlignedPixels (which aligns to
+    an absolute grid anchored at coordinate (0,0), independent of the
+    source's actual origin — this can pull in real data from just past the
+    intended envelope when the source's origin isn't itself a whole-pixel
+    multiple from (0,0))."""
     src_ds = gdal.Open(input_path)
     src_gt = src_ds.GetGeoTransform()
     x_res, y_res = abs(src_gt[1]), abs(src_gt[5])
     src_ds = None
 
+    snapped_extent = _snap_bounds_to_source_grid(src_gt, x_res, y_res, extent)
+
     gdal.Warp(
         output_path, input_path,
-        outputBounds=extent,
+        outputBounds=snapped_extent,
         xRes=x_res, yRes=y_res,
-        targetAlignedPixels=True,
         dstNodata=nodata,
         format="GTiff",
     )
@@ -238,8 +261,7 @@ def _convert_to_ascii(input_path, output_path):
 
 
 class _Point:
-    __slots__ = ("type", "frompointid", "x", "y", "numzone", "flowacc",
-                 "side", "lim1", "lim2", "side2", "lim3", "lim4")
+    __slots__ = ("type", "frompointid", "x", "y", "numzone", "flowacc", "side")
 
 
 def prepare_hydraulic_sim(
@@ -251,14 +273,16 @@ def prepare_hydraulic_sim(
     zbed_path,
     manning_path,
     mask_path,
-    distoutput,
     percent,
     output_folder,
     crs,
     feedback=None,
 ):
     """
-    Mirrors ArcGIS execute_DefBCI(): builds per-zone LISFLOOD-FP input files.
+    Mirrors ArcGIS_dev's execute_DefBCI(): builds per-zone LISFLOOD-FP input
+    files. The downstream boundary condition (exit window) is no longer
+    computed here — Run Hydraulic Simulations computes it at run time using
+    each zone's already-simulated downstream neighbour's actual result raster.
 
     Args:
         flowdir_path   : str — path to watershed-scale D8 flow direction raster
@@ -270,7 +294,6 @@ def prepare_hydraulic_sim(
         zbed_path      : str — path to D4 bed elevation raster
         manning_path   : str — path to floodplain Manning's n raster
         mask_path      : str — path to channel mask raster
-        distoutput     : int — total exit window width (m)
         percent        : float — flow accumulation increase threshold (%)
         output_folder  : str — destination folder for .bci and ASCII files
         crs            : QgsCoordinateReferenceSystem — CRS for inbci/outbci QC layers
@@ -313,8 +336,8 @@ def prepare_hydraulic_sim(
 
     envelopezones_path = os.path.join(zones_folder, "envelopezones.gpkg")
     envelopezones_fields = QgsFields()
-    envelopezones_fields.append(QgsField("GRID_CODE", QVariant.Int))
-    envelopezones_fields.append(QgsField("Lake_ID", QVariant.Int))
+    envelopezones_fields.append(QgsField("GRID_CODE", QMetaType.Int))
+    envelopezones_fields.append(QgsField("Lake_ID", QMetaType.Int))
 
     envelopezones_options = QgsVectorFileWriter.SaveVectorOptions()
     envelopezones_options.driverName = "GPKG"
@@ -394,6 +417,12 @@ def prepare_hydraulic_sim(
             prev_row, prev_col = current_row, current_col
             current_flowacc = float(fa_array[current_row, current_col])
 
+            if current_flowacc == 0:
+                raise QgsProcessingException(
+                    "Flow accumulation value of zero encountered. Check that source "
+                    "points are located on the flow network."
+                )
+
             if last_flowacc > 0 and 100.0 * (current_flowacc - last_flowacc) / last_flowacc >= percent:
                 lat_pt = _Point()
                 lat_pt.type = "lateral"
@@ -451,99 +480,15 @@ def prepare_hydraulic_sim(
     info(f"  {len(output_points)} output point(s) found")
 
     # ------------------------------------------------------------------
-    # Step 3: configure boundary condition exit windows
+    # Step 3: write inbci/outbci vector layers for QC
     # ------------------------------------------------------------------
-    info("Step 3/4: Configuring boundary condition windows…")
-
-    for pt in output_points:
-        zone_tif = os.path.join(zones_folder, f"zone{pt.numzone}.tif")
-        gt, array, nodata = _load_raster(zone_tif)
-        px_w, px_h = abs(gt[1]), abs(gt[5])
-        half_width = distoutput / 2.0
-
-        pt.side2 = "0"
-        pt.lim3 = 0
-        pt.lim4 = 0
-
-        def walk(x0, y0, row_inc, col_inc, dist_inc):
-            row, col = _xy_to_rowcol(gt, x0, y0)
-            distance = 0.0
-            while (_in_bounds(row, col, array) and array[row, col] != nodata
-                   and distance < half_width):
-                distance += dist_inc
-                row += row_inc
-                col += col_inc
-            row -= row_inc
-            col -= col_inc
-            return row, col, distance
-
-        # First direction along the exit edge
-        if pt.side in ("W", "E"):
-            row_inc, col_inc, dist_inc = 1, 0, px_h
-        else:
-            row_inc, col_inc, dist_inc = 0, 1, px_w
-
-        row, col, distance = walk(pt.x, pt.y, row_inc, col_inc, dist_inc)
-        x1, y1 = _rowcol_to_xy(gt, row, col)
-        pt.lim1 = y1 if pt.side in ("W", "E") else x1
-
-        if distance < half_width:
-            if pt.side == "W":
-                row_inc2, col_inc2, dist_inc2 = 0, 1, px_w
-            elif pt.side == "E":
-                row_inc2, col_inc2, dist_inc2 = 0, -1, px_w
-            elif pt.side == "N":
-                row_inc2, col_inc2, dist_inc2 = 1, 0, px_h
-            else:
-                row_inc2, col_inc2, dist_inc2 = -1, 0, px_h
-
-            row2, col2, _ = walk(x1, y1, row_inc2, col_inc2, dist_inc2)
-            x2, y2 = _rowcol_to_xy(gt, row2, col2)
-            pt.lim3 = x1 if pt.side in ("W", "E") else y1
-
-            if pt.side in ("W", "E"):
-                pt.side2, pt.lim4 = "S", x2
-            else:
-                pt.side2, pt.lim4 = "E", y2
-
-        # Opposite direction along the exit edge
-        if pt.side in ("W", "E"):
-            row_inc, col_inc, dist_inc = -1, 0, px_h
-        else:
-            row_inc, col_inc, dist_inc = 0, -1, px_w
-
-        row, col, distance = walk(pt.x, pt.y, row_inc, col_inc, dist_inc)
-        x1b, y1b = _rowcol_to_xy(gt, row, col)
-        pt.lim2 = y1b if pt.side in ("W", "E") else x1b
-
-        if distance < half_width and pt.side2 == "0":
-            if pt.side == "W":
-                row_inc2, col_inc2, dist_inc2 = 0, 1, px_w
-            elif pt.side == "E":
-                row_inc2, col_inc2, dist_inc2 = 0, -1, px_w
-            elif pt.side == "N":
-                row_inc2, col_inc2, dist_inc2 = 1, 0, px_h
-            else:
-                row_inc2, col_inc2, dist_inc2 = -1, 0, px_h
-
-            row2, col2, _ = walk(x1b, y1b, row_inc2, col_inc2, dist_inc2)
-            x2b, y2b = _rowcol_to_xy(gt, row2, col2)
-
-            if pt.side in ("W", "E"):
-                pt.side2, pt.lim4 = "N", x2b
-            else:
-                pt.side2, pt.lim4 = "W", y2b
-
-    # ------------------------------------------------------------------
-    # Step 3b: write inbci/outbci vector layers for QC
-    # ------------------------------------------------------------------
-    info("Writing inbci/outbci QC layers…")
+    info("Step 3/4: Writing inbci/outbci QC layers…")
     inbci_path = os.path.join(zones_folder, "inbci.gpkg")
     inbci_fields = QgsFields()
-    inbci_fields.append(QgsField("zoneid", QVariant.Int))
-    inbci_fields.append(QgsField("flowacc", QVariant.Double))
-    inbci_fields.append(QgsField("type", QVariant.String))
-    inbci_fields.append(QgsField("fpid", QVariant.Int))
+    inbci_fields.append(QgsField("zoneid", QMetaType.Int))
+    inbci_fields.append(QgsField("flowacc", QMetaType.Double))
+    inbci_fields.append(QgsField("type", QMetaType.QString))
+    inbci_fields.append(QgsField("fpid", QMetaType.Int))
     inbci_options = QgsVectorFileWriter.SaveVectorOptions()
     inbci_options.driverName = "GPKG"
     inbci_options.fileEncoding = "UTF-8"
@@ -566,13 +511,8 @@ def prepare_hydraulic_sim(
 
     outbci_path = os.path.join(zones_folder, "outbci.gpkg")
     outbci_fields = QgsFields()
-    outbci_fields.append(QgsField("zoneid", QVariant.Int))
-    outbci_fields.append(QgsField("side", QVariant.String))
-    outbci_fields.append(QgsField("lim1", QVariant.Double))
-    outbci_fields.append(QgsField("lim2", QVariant.Double))
-    outbci_fields.append(QgsField("side2", QVariant.String))
-    outbci_fields.append(QgsField("lim3", QVariant.Double))
-    outbci_fields.append(QgsField("lim4", QVariant.Double))
+    outbci_fields.append(QgsField("zoneid", QMetaType.Int))
+    outbci_fields.append(QgsField("side", QMetaType.QString))
     outbci_options = QgsVectorFileWriter.SaveVectorOptions()
     outbci_options.driverName = "GPKG"
     outbci_options.fileEncoding = "UTF-8"
@@ -589,8 +529,7 @@ def prepare_hydraulic_sim(
     for pt in output_points:
         f = QgsFeature(outbci_fields)
         f.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(pt.x, pt.y)))
-        f.setAttributes([pt.numzone, pt.side, pt.lim1, pt.lim2,
-                         pt.side2, pt.lim3, pt.lim4])
+        f.setAttributes([pt.numzone, pt.side])
         writer.addFeature(f)
     del writer
     info(f"  Wrote {inbci_path} and {outbci_path}")
@@ -614,13 +553,6 @@ def prepare_hydraulic_sim(
                 else:
                     latnum += 1
                     f.write(f"P\t{int(pt.x)}\t{int(pt.y)}\tQVAR\tzone{zone_id}_{latnum}\n")
-
-        out_pt = next((p for p in output_points if p.numzone == zone_id), None)
-        if out_pt is not None:
-            with open(bci_path, "a") as f:
-                f.write(f"{out_pt.side}\t{int(out_pt.lim1)}\t{int(out_pt.lim2)}\tHVAR\thvar")
-                if out_pt.side2 != "0":
-                    f.write(f"\n{out_pt.side2}\t{int(out_pt.lim3)}\t{int(out_pt.lim4)}\tHVAR\thvar")
 
     for zone_id, extent in zone_extents.items():
         zone_tif = os.path.join(zones_folder, f"zone{zone_id}.tif")
