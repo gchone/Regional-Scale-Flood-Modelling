@@ -1,19 +1,12 @@
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterMultipleLayers,
-    QgsProcessingParameterRasterLayer,
-    QgsProcessingOutputString,
     QgsProcessing,
 )
 from osgeo import gdal
 
 
-# =============================================================================
-# QgsProcessingAlgorithm
-# =============================================================================
-
 class VerifyRasterAlignment(QgsProcessingAlgorithm):
-
     RASTERS = "RASTERS"
 
     def name(self):
@@ -34,39 +27,47 @@ class VerifyRasterAlignment(QgsProcessingAlgorithm):
     def shortHelpString(self):
         return (
             "Verify raster alignment\n\n"
-            "Checks that all input rasters share the same origin, pixel size, "
-            "and dimensions. Reports mismatches in the log.\n\n"
+            "Checks that all input rasters share the same pixel size and grid "
+            "phase (i.e. cell edges line up) relative to the first raster "
+            "selected, which is treated as the reference. Rasters may have "
+            "different extents/dimensions and still be aligned - only pixel "
+            "size and origin phase matter. Reports mismatches in the log.\n\n"
             "Inputs:\n"
-            "- Rasters: two or more raster layers to compare\n\n"
+            "- Rasters: two or more raster layers to compare (first = reference)\n\n"
             "Output:\n"
             "- Alignment report printed to the log\n"
         )
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterMultipleLayers(
-            self.RASTERS, "Rasters to check",
+            self.RASTERS, "Rasters to check (first = reference)",
             layerType=QgsProcessing.TypeRaster,
         ))
 
     def processAlgorithm(self, parameters, context, feedback):
         layers = self.parameterAsLayerList(parameters, self.RASTERS, context)
+        if len(layers) < 2:
+            feedback.reportError("Select at least two rasters to compare.")
+            return {}
 
         infos = []
         for layer in layers:
             ds = gdal.Open(layer.source())
+            if ds is None:
+                feedback.reportError(f"Could not open raster with GDAL: {layer.name()} ({layer.source()})")
+                return {}
             gt = ds.GetGeoTransform()
             infos.append({
                 "name":    layer.name(),
                 "origin_x": gt[0],
                 "origin_y": gt[3],
-                "pixel_w":  gt[1],
-                "pixel_h":  gt[5],
+                "pixel_w":  abs(gt[1]),
+                "pixel_h":  abs(gt[5]),
                 "cols":     ds.RasterXSize,
                 "rows":     ds.RasterYSize,
             })
             ds = None
 
-        # Print summary
         feedback.pushInfo("=== Raster Alignment Report ===")
         for info in infos:
             feedback.pushInfo(
@@ -76,24 +77,29 @@ class VerifyRasterAlignment(QgsProcessingAlgorithm):
                 f"size={info['cols']}x{info['rows']}"
             )
 
-        # Check alignment against first raster
         ref = infos[0]
         feedback.pushInfo(f"\nReference: {ref['name']}")
+        tol = 1e-6
         all_match = True
+
         for info in infos[1:]:
             mismatches = []
-            if round(info['origin_x'], 3) != round(ref['origin_x'], 3) or \
-               round(info['origin_y'], 3) != round(ref['origin_y'], 3):
-                mismatches.append("origin")
-            if info['pixel_w'] != ref['pixel_w'] or info['pixel_h'] != ref['pixel_h']:
-                mismatches.append("pixel size")
-            if info['cols'] != ref['cols'] or info['rows'] != ref['rows']:
-                mismatches.append("dimensions")
+
+            if abs(info['pixel_w'] - ref['pixel_w']) > tol or abs(info['pixel_h'] - ref['pixel_h']) > tol:
+                mismatches.append(
+                    f"pixel size ({info['pixel_w']}x{info['pixel_h']} vs {ref['pixel_w']}x{ref['pixel_h']})"
+                )
+            else:
+                # Only meaningful to check phase if pixel size actually matches
+                dx = (info['origin_x'] - ref['origin_x']) / ref['pixel_w']
+                dy = (info['origin_y'] - ref['origin_y']) / ref['pixel_h']
+                if abs(dx - round(dx)) > tol or abs(dy - round(dy)) > tol:
+                    mismatches.append(
+                        f"grid phase (offset {dx:.4f}, {dy:.4f} px from reference - not a whole-pixel offset)"
+                    )
 
             if mismatches:
-                feedback.reportError(
-                    f"MISMATCH — {info['name']}: {', '.join(mismatches)} differ from reference"
-                )
+                feedback.reportError(f"MISMATCH — {info['name']}: {'; '.join(mismatches)}")
                 all_match = False
             else:
                 feedback.pushInfo(f"OK — {info['name']}: aligned with reference")
