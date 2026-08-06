@@ -7,6 +7,7 @@ from qgis.core import (
     QgsProcessingParameterString,
     QgsProcessingParameterFeatureSink,
     QgsField,
+    QgsFeature,
     QgsVectorFileWriter,
 )
 from qgis.PyQt.QtCore import QVariant
@@ -18,7 +19,7 @@ class JoinFloodDischarge(QgsProcessingAlgorithm):
     STATIONS   = "STATIONS"
     NAME_FIELD = "NAME_FIELD"
     CSV_FILE   = "CSV_FILE"
-    SCENARIO   = "SCENARIO"
+    SCENARIOS  = "SCENARIOS"
     OUTPUT     = "OUTPUT"
 
     def name(self):
@@ -40,16 +41,21 @@ class JoinFloodDischarge(QgsProcessingAlgorithm):
         return (
             "Join flood discharge to stations\n\n"
             "Reads a flood discharge CSV (rows = discharge scenarios e.g. Q20/Q100, "
-            "columns = station names) and adds the selected scenario's discharge "
+            "columns = station names) and adds each selected scenario's discharge "
             "values as a new field on the gauging stations point layer, matched by "
             "station name.\n\n"
+            "All scenarios needed should be selected in one run - each run starts "
+            "fresh from the Stations input's own fields, so running this "
+            "separately per scenario against the same original stations layer "
+            "will not accumulate fields across runs; only the last scenario run "
+            "would end up in the output.\n\n"
             "Inputs:\n"
             "- Stations: gauging station points\n"
             "- Name field: station name field on the stations layer\n"
             "- CSV file: discharge CSV (first column = scenario name)\n"
-            "- Scenario: which row to use, e.g. Q100\n\n"
-            "Output: stations with the scenario's discharge added as a new field. "
-            "Rerun with a different scenario for each flood return period needed.\n"
+            "- Scenarios: which row(s) to use, semicolon-separated (e.g. Q100;Q200;Q350)\n\n"
+            "Output: stations with each selected scenario's discharge added as its "
+            "own field (e.g. Q100, Q200, Q350).\n"
         )
 
     def initAlgorithm(self, config=None):
@@ -63,7 +69,7 @@ class JoinFloodDischarge(QgsProcessingAlgorithm):
             self.CSV_FILE, "Discharge CSV",
         ))
         self.addParameter(QgsProcessingParameterString(
-            self.SCENARIO, "Scenario (e.g. Q100)",
+            self.SCENARIOS, "Scenarios (semicolon-separated, e.g. Q100;Q200;Q350)",
         ))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUTPUT, "Stations with discharge",
@@ -73,29 +79,45 @@ class JoinFloodDischarge(QgsProcessingAlgorithm):
         stations   = self.parameterAsVectorLayer(parameters, self.STATIONS, context)
         name_field = self.parameterAsString(parameters, self.NAME_FIELD, context)
         csv_path   = self.parameterAsFile(parameters, self.CSV_FILE, context)
-        scenario   = self.parameterAsString(parameters, self.SCENARIO, context)
+        scenarios_text = self.parameterAsString(parameters, self.SCENARIOS, context)
 
         if stations is None:
             raise QgsProcessingException("Stations layer is invalid")
 
-        discharge_by_station = {}
+        scenarios = [s.strip() for s in scenarios_text.split(";") if s.strip()]
+        if not scenarios:
+            raise QgsProcessingException("No scenario(s) provided")
+
+        # discharge_by_station[scenario][station_name] = value
+        discharge_by_station = {s: {} for s in scenarios}
+        remaining = set(scenarios)
+
         with open(csv_path, "r") as f:
             reader = csv.reader(f)
             headers = next(reader)
             station_names = headers[1:]
             for row in reader:
-                if row[0] == scenario:
+                if row[0] in remaining:
                     for name, val in zip(station_names, row[1:]):
-                        discharge_by_station[name] = float(val)
-                    break
-            else:
-                raise QgsProcessingException(f"Scenario '{scenario}' not found in {csv_path}")
+                        discharge_by_station[row[0]][name] = float(val)
+                    remaining.discard(row[0])
+                    if not remaining:
+                        break
 
-        feedback.pushInfo(f"Found {len(discharge_by_station)} station discharge(s) for {scenario}")
+        if remaining:
+            raise QgsProcessingException(
+                f"Scenario(s) not found in {csv_path}: {sorted(remaining)}"
+            )
+
+        for scenario in scenarios:
+            feedback.pushInfo(f"Found {len(discharge_by_station[scenario])} station discharge(s) for {scenario}")
 
         out_fields = stations.fields()
-        if out_fields.indexOf(scenario) == -1:
-            out_fields.append(QgsField(scenario, QVariant.Double))
+        for scenario in scenarios:
+            if out_fields.indexOf(scenario) == -1:
+                out_fields.append(QgsField(scenario, QVariant.Double))
+            else:
+                feedback.pushWarning(f"Field '{scenario}' already exists on the Stations input - overwriting its values")
 
         sink, dest_id = self.parameterAsSink(
             parameters, self.OUTPUT, context,
@@ -104,20 +126,36 @@ class JoinFloodDischarge(QgsProcessingAlgorithm):
         if sink is None:
             raise QgsProcessingException("Could not create output sink")
 
-        unmatched = []
+        unmatched = {s: [] for s in scenarios}
         for feat in stations.getFeatures():
             name = feat[name_field]
-            attrs = feat.attributes()
-            attrs.append(discharge_by_station.get(name))
-            if name not in discharge_by_station:
-                unmatched.append(name)
-            from qgis.core import QgsFeature
             out_feat = QgsFeature(out_fields)
             out_feat.setGeometry(feat.geometry())
+
+            attrs = feat.attributes()
+            if len(attrs) < out_fields.count():
+                # Existing feature attrs are shorter than out_fields only when
+                # none of the requested scenario fields already existed on
+                # the input - pad with the new scenario values in order.
+                for scenario in scenarios:
+                    val = discharge_by_station[scenario].get(name)
+                    attrs.append(val)
+                    if name not in discharge_by_station[scenario]:
+                        unmatched[scenario].append(name)
+            else:
+                # One or more scenario fields already existed on the input -
+                # set each by field index instead of assuming append order.
+                for scenario in scenarios:
+                    val = discharge_by_station[scenario].get(name)
+                    attrs[out_fields.indexOf(scenario)] = val
+                    if name not in discharge_by_station[scenario]:
+                        unmatched[scenario].append(name)
+
             out_feat.setAttributes(attrs)
             sink.addFeature(out_feat)
 
-        if unmatched:
-            feedback.pushWarning(f"{len(unmatched)} station(s) had no {scenario} value: {unmatched}")
+        for scenario, names in unmatched.items():
+            if names:
+                feedback.pushWarning(f"{len(names)} station(s) had no {scenario} value: {names}")
 
         return {self.OUTPUT: dest_id}
