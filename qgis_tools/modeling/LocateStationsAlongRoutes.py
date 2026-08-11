@@ -19,7 +19,6 @@ from qgis.PyQt.QtCore import QMetaType
 class LocateStationsAlongRoutes(QgsProcessingAlgorithm):
     STATIONS       = "STATIONS"
     NAME_FIELD     = "NAME_FIELD"
-    DRAINAGE_FIELD = "DRAINAGE_FIELD"
     ROUTES         = "ROUTES"
     ROUTES_RID     = "ROUTES_RID"
     DISTANCE       = "DISTANCE"
@@ -53,7 +52,6 @@ class LocateStationsAlongRoutes(QgsProcessingAlgorithm):
             "Inputs:\n"
             "- Stations: gauging station points\n"
             "- Name field: station name field (must match discharge CSV headers)\n"
-            "- Drainage area field: drainage area at each station\n"
             "- Routes D8: watershed-scale D8 route network (lines)\n"
             "- RID field in routes: unique reach ID field\n"
             "- Search radius: maximum snap distance (e.g. 10000)\n\n"
@@ -67,9 +65,6 @@ class LocateStationsAlongRoutes(QgsProcessingAlgorithm):
         ))
         self.addParameter(QgsProcessingParameterField(
             self.NAME_FIELD, "Name field", parentLayerParameterName=self.STATIONS,
-        ))
-        self.addParameter(QgsProcessingParameterField(
-            self.DRAINAGE_FIELD, "Drainage area field", parentLayerParameterName=self.STATIONS,
         ))
         self.addParameter(QgsProcessingParameterVectorLayer(
             self.ROUTES, "Routes D8 (lines)", [QgsProcessing.TypeVectorLine],
@@ -88,7 +83,6 @@ class LocateStationsAlongRoutes(QgsProcessingAlgorithm):
     def processAlgorithm(self, parameters, context, feedback):
         stations       = self.parameterAsSource(parameters, self.STATIONS, context)
         name_field     = self.parameterAsString(parameters, self.NAME_FIELD, context)
-        drainage_field = self.parameterAsString(parameters, self.DRAINAGE_FIELD, context)
         routes         = self.parameterAsVectorLayer(parameters, self.ROUTES, context)
         rid_field      = self.parameterAsString(parameters, self.ROUTES_RID, context)
         distance       = self.parameterAsDouble(parameters, self.DISTANCE, context)
@@ -101,16 +95,13 @@ class LocateStationsAlongRoutes(QgsProcessingAlgorithm):
         located = locate_stations_along_routes(
             stations=stations,
             name_field=name_field,
-            drainage_field=drainage_field,
             routes=routes,
             rid_field=rid_field,
             distance=distance,
             feedback=feedback,
         )
 
-        out_fields = QgsFields()
-        out_fields.append(QgsField("name", QMetaType.QString))
-        out_fields.append(QgsField("drainage_area", QMetaType.Double))
+        out_fields = QgsFields(stations.fields())
         out_fields.append(QgsField("RID", QMetaType.LongLong))
         out_fields.append(QgsField("MEAS", QMetaType.Double))
 
@@ -136,7 +127,6 @@ class LocateStationsAlongRoutes(QgsProcessingAlgorithm):
 def locate_stations_along_routes(
     stations,
     name_field,
-    drainage_field,
     routes,
     rid_field,
     distance,
@@ -146,6 +136,7 @@ def locate_stations_along_routes(
     Snaps each station to the nearest route within `distance`, and computes
     RID (matched reach ID) and MEAS (linear distance along that reach).
 
+
     Mirrors ArcGIS Locate Features Along Routes, and the same logic
     previously embedded as Step 3 of spatialize_q_from_gauging_stations —
     pulled out here so it can be reused independently for flood discharge
@@ -154,14 +145,13 @@ def locate_stations_along_routes(
     Args:
         stations       : QgsFeatureSource (points) — gauging stations
         name_field     : str — station name field (must match CSV headers)
-        drainage_field : str — drainage area field
         routes         : QgsVectorLayer (lines) — D8 route network
         rid_field      : str — RID field in routes
         distance       : float — maximum snap distance in CRS units
         feedback       : QgsProcessingFeedback or None
 
     Returns:
-        list of QgsFeature (with geometry) — fields: name, drainage_area, RID, MEAS
+        list of QgsFeature (with geometry) — fields: all input station fields, name, RID, MEAS
     """
     def info(msg):
         if feedback:
@@ -178,9 +168,7 @@ def locate_stations_along_routes(
         route_index.insertFeature(feat)
         route_feats[feat.id()] = feat
 
-    out_fields = QgsFields()
-    out_fields.append(QgsField("name", QMetaType.QString))
-    out_fields.append(QgsField("drainage_area", QMetaType.Double))
+    out_fields = QgsFields(stations.fields())
     out_fields.append(QgsField("RID", QMetaType.LongLong))
     out_fields.append(QgsField("MEAS", QMetaType.Double))
 
@@ -224,12 +212,7 @@ def locate_stations_along_routes(
 
         out_feat = QgsFeature(out_fields)
         out_feat.setGeometry(pt_geom)
-        out_feat.setAttributes([
-            feat[name_field],
-            float(feat[drainage_field]),
-            best_rid,
-            best_meas,
-        ])
+        out_feat.setAttributes(feat.attributes() + [best_rid, best_meas])
         located.append(out_feat)
 
     info(f"Located {len(located)} station(s) on the route network "
