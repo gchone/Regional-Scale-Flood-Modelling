@@ -457,17 +457,22 @@ def _write_downstream_boundary(
     else:
         primary_axis_row = False
 
-    def sample_and_maybe_write(row, col, lim_a, lim_b, cur_side):
+    def sample_and_maybe_write(row, col, lim_a, lim_b, cur_side, use_zbed=False):
         nonlocal numhvar
         if lakebci:
             return
-        ref_val = ref_grid.get_value(row, col)
-        if ref_val is None:
+        if use_zbed:
+            elev_row = zbed_grid.y_to_row(outpoint_y)
+            elev_col = zbed_grid.x_to_col(outpoint_x)
+            base_val = zbed_grid.get_value(elev_row, elev_col)
+        else:
+            base_val = ref_grid.get_value(row, col)
+        if base_val is None:
             return
         hfix = _sample_offset(res_grid, ref_grid, row, col, cur_side)
         if hfix is None:
             return
-        zdep = min(ref_val + 0.3, hfix)
+        zdep = min(base_val + 0.3, hfix)
         numhvar = _write_hvar(filebci, filebdy, cur_side, lim_a, lim_b, zdep, hfix, sim_time, numhvar)
 
     def walk_primary(sign, write_initial):
@@ -490,7 +495,7 @@ def _write_downstream_boundary(
         # centered on the true outpoint coordinate (matches dev's shape.Y/X ± distinc/2)
         if not lakebci and write_initial:
             center = outpoint_y if primary_axis_row else outpoint_x
-            sample_and_maybe_write(row, col, center - dist_inc / 2.0, center + dist_inc / 2.0, side)
+            sample_and_maybe_write(row, col, center - dist_inc / 2.0, center + dist_inc / 2.0, side, use_zbed=True)
 
         distance = 0.0
         while ref_grid.in_bounds(row, col) and distance < distoutput / 2.0:
