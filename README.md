@@ -15,6 +15,7 @@ A stand-alone version of the bed assessment procedure (not requiring GIS softwar
 
 * The main branch, "ArcGIS", contains the latest version of the tools, for ArcGIS PRO. A zip file is available in the [Releases](https://github.com/gchone/ConcordiaRiverLab-FloodTools/releases) section.
 * The "OpenGIS-2006" branch contains a port of the version 3.3.0 for QGIS
+
 A new version of the ArcGIS tools, currently in tests in branch "ArcGIS-dev", is soon to be released (target: end of August 2026). Equivalent QGIS version should be released in the following months.
 
 ---
