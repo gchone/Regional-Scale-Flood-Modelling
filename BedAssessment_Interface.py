@@ -168,6 +168,6 @@ class BedAssessment(object):
 
         execute_BedAssessment(route, route_RID_field, route_order_field, routelinks, points, points_IDfield,
                               points_RIDfield, points_distfield, points_Qfield, points_Wfield, points_WSfield,
-                              points_DEMfield, manning, min_slope, output_pts, messages, method="2-XS", supercritical=False, max_delta_y=40)
+                              points_DEMfield, manning, min_slope, output_pts, messages)
 
         return
