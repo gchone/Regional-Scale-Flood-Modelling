@@ -337,11 +337,14 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
     #   This is used to spatialize flood discharges
     # - Qcsv_file provides multiple discharges, and the right discharge to use is indicated by the DEM_footprints
     #   This is used to spatialize LiDAR discharges
+    # NoData values are supported in the csv file: a gauging station can be missing a value for some discharges.
+    #   upQpts and downQpts are therefore dictionaries (key = discharge name), since the closest upstream/downstream
+    #   gauging point(s) usable for the interpolation can differ from one discharge to another.
 
     class Ref_point:
         def __init__(self, name, discharges, drainage_area, reach, dist):
             self.name = name
-            self.discharges = discharges
+            self.discharges = discharges # dict {discharge_name: value}. Only discharges with actual data are present
             self.drainage_area = drainage_area
             self.reach = reach
             self.dist = dist
@@ -398,9 +401,10 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
             for line in csvreader:
                 discharges_list.append(line[firstrowname])
                 for station in csvreader.fieldnames[1:]:
-                    if line[station] is not None and line[station] != '': # to avoid missing data
+                    if line[station] is not None and line[station] != '' and float(line[station]) != -999 and float(line[station]) != -9999: # to avoid missing data (NoData)
                         Q_dict[station][line[firstrowname]] = float(line[station])
-        # For each gauging station point, assign its dictionnary of discharges
+        # For each gauging station point, assign its dictionnary of discharges (a station may be missing some
+        #  discharges if the csv file has NoData/empty values for it)
         for reach in network.browse_reaches_down_to_up():
             for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
                 try:
@@ -409,7 +413,6 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
                     messages.addErrorMessage("Missing gauging station in the csv file: " + str(Qpts.name))
     else:
         # In the case of only discharges being a field in the gauging station file, format things the same way:
-        Qpts.discharges = {Q_field: Qpts.discharge}
         discharges_list = [Q_field]
         for reach in network.browse_reaches_down_to_up():
             for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
@@ -417,25 +420,32 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
             for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
                 targetpt.DEM = Q_field
 
-    # First browse: assign the upstream Q point(s) (in a list)
-    # This is in addition done for each discharge, in case some stations have no data values in the csv file
+    # Initialize the per-target-point attributes once (upQpts/downQpts are dictionaries, keyed by discharge, so
+    #  that each discharge can independently have (or not have) an upstream/downstream reference point)
+    for reach in network.browse_reaches_down_to_up():
+        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+            targetpt.upQpts = {}
+            targetpt.downQpts = {}
+            targetpt.weightedQ = {}
+            targetpt.computedQLiDAR = -999
+
+    # First browse: assign the upstream Q point(s) (in a list), separately for each discharge, since a gauging
+    #  station missing a value (NoData) for a given discharge must be skipped only for that discharge
     for discharge in discharges_list:
-        for reach in network.browse_reaches_down_to_up():
-            for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
-                if not hasattr(targetpt, "upQpts"):
-                    targetpt.upQpts = {}
-                targetpt.upQpts[discharge] = [] # just to initiate the lists
-                targetpt.downQpts = {}
         for reach in network.browse_reaches_up_to_down():
             if reach.is_upstream_end():
                 lastQpts = None
             for Qpts in reach.browse_points(Qcollection, orientation="UP_TO_DOWN"):
+                if discharge not in Qpts.discharges: # NoData for this discharge: this station is ignored for it
+                    continue
                 if lastQpts is not None:
                     if lastQpts.reach.id == reach.id:
                         max_dist = lastQpts.dist
                     else:
                         max_dist = None
                     for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
+                        if discharge not in targetpt.upQpts:
+                            targetpt.upQpts[discharge] = [] # just to initiate the lists
                         if (max_dist is None or targetpt.dist <= max_dist) and targetpt.dist > Qpts.dist:
                             if lastQpts.name not in [pt.name for pt in targetpt.upQpts[discharge]]:
                                 targetpt.upQpts[discharge].append(lastQpts)
@@ -448,6 +458,8 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
                 else:
                     max_dist = None
                 for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
+                    if discharge not in targetpt.upQpts:
+                        targetpt.upQpts[discharge] = []
                     if max_dist is None or targetpt.dist <= max_dist:
                         if lastQpts.name not in [pt.name for pt in targetpt.upQpts[discharge]]:
                             targetpt.upQpts[discharge].append(lastQpts)
@@ -457,6 +469,8 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
     # In the same browse, compute the discharges, by linear interpolation between each upstream/downstream pairs
     # If there are several upstream points, weight the results according to the upstream points drainage area
     # The final upstream point of a reach act as an input Q point for the upstream reaches
+    # Everything is done separately for each discharge: the closest upstream/downstream gauging point (and whether
+    #  there is one at all) can differ between discharges when NoData values are present in the csv file
     for discharge in discharges_list:
         for reach in network.browse_reaches_down_to_up():
 
@@ -464,10 +478,14 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
 
             lastQpts = None
             if not reach.is_downstream_end():
-                lastQpts = reach.get_downstream_reach().upstream_calculated_Q
+                down_calculated_Q = reach.get_downstream_reach().upstream_calculated_Q
+                if discharge in down_calculated_Q.discharges:
+                    lastQpts = down_calculated_Q
 
             # Is there a discharge point on the current reach?
             for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
+                if discharge not in Qpts.discharges: # NoData for this discharge: this station is ignored for it
+                    continue
                 if lastQpts is not None:
                     if lastQpts.reach.id == reach.id:
                         min_dist = lastQpts.dist
@@ -492,40 +510,60 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
             ### Second block : compute the discharges ###
 
             for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
-                targetpt.computedQLiDAR = -999
 
                 localarea = targetpt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.
-                if discharge not in targetpt.downQpts: # there is no downstream point
+                uppts = targetpt.upQpts.get(discharge, [])
+                downpt = targetpt.downQpts.get(discharge)
+
+                if downpt is None: # there is no downstream point (for this discharge)
                     # A simple proportionnality of A**beta is done for each upstream point
-                    for uppt in targetpt.upQpts[discharge]:
+                    for uppt in uppts:
                         uppt.interpolatedQ = uppt.discharges[discharge]*(localarea/uppt.drainage_area)**beta_coef
                 else:
                     # Linear interpolation of A**beta
-                    for uppt in targetpt.upQpts[discharge]:
+                    for uppt in uppts:
                         Q_from_down = (localarea ** beta_coef - uppt.drainage_area ** beta_coef) / (
-                                    targetpt.downQpts[discharge].drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*targetpt.downQpts[discharge].discharges[discharge]
-                        Q_from_up = (targetpt.downQpts[discharge].drainage_area ** beta_coef - localarea ** beta_coef) / (
-                                targetpt.downQpts[discharge].drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*uppt.discharges[discharge]
+                                    downpt.drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*downpt.discharges[discharge]
+                        Q_from_up = (downpt.drainage_area ** beta_coef - localarea ** beta_coef) / (
+                                downpt.drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*uppt.discharges[discharge]
 
                         uppt.interpolatedQ = Q_from_down + Q_from_up
 
                 # weight the results according to the upstream points drainage area
-                if len(targetpt.upQpts)>0:
-                    targetpt.computedQLiDAR = 0
-                    totalweight = sum([uppt.drainage_area for uppt in targetpt.upQpts[discharge]])
-                    for uppt in targetpt.upQpts[discharge]:
-                        targetpt.computedQLiDAR += uppt.interpolatedQ*uppt.drainage_area/totalweight
-                else: # there is no upstream points
-                    if discharge in targetpt.downQpts: # there is a downstream point
-                        # A simple proportionnality of A**beta is done from the downstream point
-                        targetpt.computedQLiDAR = targetpt.downQpts[discharge].discharges[discharge] * (localarea / targetpt.downQpts[discharge].drainage_area) ** beta_coef
+                if len(uppts) > 0:
+                    weighted_value = 0
+                    totalweight = sum([uppt.drainage_area for uppt in uppts])
+                    for uppt in uppts:
+                        weighted_value += uppt.interpolatedQ*uppt.drainage_area/totalweight
+                    targetpt.weightedQ[discharge] = weighted_value
+                elif downpt is not None: # there is no upstream point, but there is a downstream point
+                    # A simple proportionnality of A**beta is done from the downstream point
+                    targetpt.weightedQ[discharge] = downpt.discharges[discharge] * (localarea / downpt.drainage_area) ** beta_coef
+                # else: neither an upstream nor a downstream point exists for this discharge: no value can be
+                #  computed. targetpt.weightedQ[discharge] is simply left unset (NoData is propagated)
 
 
-            ### Third block: Convert the final upstream point into a Q input ###
+            ### Third block : Convert the final upstream point into a Q input ###
             lastuppt = reach.get_last_point(targetcollection)
-            reach.upstream_calculated_Q = Ref_point("uppt_reach"+str(reach.id), lastuppt.computedQLiDAR,
-                                                    lastuppt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.,
-                                                    reach, lastuppt.dist)
+            lastuppt_area = lastuppt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.
+            if not hasattr(reach, "upstream_calculated_Q"):
+                reach.upstream_calculated_Q = Ref_point("uppt_reach"+str(reach.id), {}, lastuppt_area, reach, lastuppt.dist)
+            else:
+                reach.upstream_calculated_Q.drainage_area = lastuppt_area
+                reach.upstream_calculated_Q.dist = lastuppt.dist
+            if discharge in lastuppt.weightedQ:
+                reach.upstream_calculated_Q.discharges[discharge] = lastuppt.weightedQ[discharge]
+
+    # Final selection: for each target point, keep the discharge value that corresponds to its own day (DEM)
+    for reach in network.browse_reaches_down_to_up():
+        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+            if targetpt.DEM in targetpt.weightedQ:
+                targetpt.computedQLiDAR = targetpt.weightedQ[targetpt.DEM]
+            else:
+                if Q_field is None:
+                    messages.addWarningMessage("Missing day of discharge in the csv file: " + str(targetpt.DEM) +
+                                             " (if -9999, make sure that all points on route D8 fall within a DEM footprint polygon)")
+                targetpt.computedQLiDAR = -999
 
     if Q_field is None:
         targetcollection.add_SavedVariable("computedQLiDAR", "float")
