@@ -98,33 +98,33 @@ class AssignPointToClosestPointOnRoute(object):
         project_path = arcpy.env.workspace
 
         param_config.filter.type = "ValueList"
-        param_config.filter.list = ["LiDAR discharge", "Bathymetry to D4", "Width to D4"]
-        param_config.value = "LiDAR discharge"
+        param_config.filter.list = ["LiDAR discharge", "Bathymetry to D4", "Width to D4", "Custom"]
+        param_config.value = "Custom"
 
         param_points.filter.list = ["Point"]
-        param_points.value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized_D8")
+        #param_points.value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized_D8")
 
         param_list_fields_to_keep.parameterDependencies = [param_points.name]
-        param_list_fields_to_keep.value = "computedQLiDAR"
+        #param_list_fields_to_keep.value = "computedQLiDAR"
 
         param_stat.filter.type = "ValueList"
         param_stat.filter.list = ["MEAN", "CLOSEST", "MAX"]
-        param_stat.value = "CLOSEST"
+        #param_stat.value = "CLOSEST"
 
         param_routes.filter.list = ["Polyline"]
-        param_routes.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
+        #param_routes.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
         param_routesIDfield.parameterDependencies = [param_routes.name]
-        param_routesIDfield.value = "RID"
-        param_points_onroute.value = os.path.join(project_path, "WaterSurface.gdb", "smoothed_pts")
+        #param_routesIDfield.value = "RID"
+        #param_points_onroute.value = os.path.join(project_path, "WaterSurface.gdb", "smoothed_pts")
         param_points_onroute_RIDfield.parameterDependencies = [param_points_onroute.name]
-        param_points_onroute_RIDfield.value = "RID"
+        #param_points_onroute_RIDfield.value = "RID"
         param_points_onroute_distfield.parameterDependencies = [param_points_onroute.name]
-        param_points_onroute_distfield.value = "MEAS"
+        #param_points_onroute_distfield.value = "MEAS"
         param_list_fields_matching.parameterDependencies = [param_points.name]
         param_list_fields_matching_target.parameterDependencies = [param_points_onroute.name]
-        param_list_fields_matching.value = "RID_routesmain;ID_DEM"
-        param_list_fields_matching_target.value = "RID;ID_DEM"
-        param_output_table.value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized")
+        #param_list_fields_matching.value = "RID_routesmain;ID_DEM"
+        #param_list_fields_matching_target.value = "RID;ID_DEM"
+        #param_output_table.value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized")
 
         params = [param_config,param_points, param_list_fields_to_keep, param_stat, param_routes,
                   param_routesIDfield, param_points_onroute, param_points_onroute_RIDfield,
@@ -138,6 +138,18 @@ class AssignPointToClosestPointOnRoute(object):
 
     def updateParameters(self, parameters):
         project_path = arcpy.env.workspace
+        if ((not parameters[1].hasBeenValidated and parameters[1].altered) or
+                (not parameters[2].hasBeenValidated and parameters[2].altered)or
+                (not parameters[3].hasBeenValidated and parameters[3].altered)or
+                (not parameters[4].hasBeenValidated and parameters[4].altered)or
+                (not parameters[5].hasBeenValidated and parameters[5].altered)or
+                (not parameters[6].hasBeenValidated and parameters[6].altered)or
+                (not parameters[7].hasBeenValidated and parameters[7].altered)or
+                (not parameters[8].hasBeenValidated and parameters[8].altered)or
+                (not parameters[9].hasBeenValidated and parameters[9].altered)or
+                (not parameters[10].hasBeenValidated and parameters[10].altered)or
+                (not parameters[11].hasBeenValidated and parameters[11].altered)):
+            parameters[0].value = "Custom"
         if not parameters[0].hasBeenValidated:
             if parameters[0].valueAsText == "LiDAR discharge":
                 parameters[1].value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized_D8")
@@ -177,6 +189,8 @@ class AssignPointToClosestPointOnRoute(object):
                 parameters[9].value = "RID_D4"
                 parameters[10].value = "RID"
                 parameters[11].value = os.path.join(project_path, "Lisflood_inputs.gdb", "width_on_D4")
+
+
         return
 
     def updateMessages(self, parameters):

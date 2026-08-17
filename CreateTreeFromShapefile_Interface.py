@@ -66,19 +66,19 @@ class CreateTreeFromShapefile(object):
         project_path = arcpy.env.workspace
 
         param_config.filter.type = "ValueList"
-        param_config.filter.list = ["Main channel only", "With secondary channels"]
-        param_config.value = "With secondary channels"
+        param_config.filter.list = ["Main channel only", "With secondary channels", "Custom"]
+        param_config.value = "Custom"
 
-        param_rivernet.value = os.path.join(project_path, "Geometry.gdb", "linear_net_d")
+        #param_rivernet.value = os.path.join(project_path, "Geometry.gdb", "linear_net_d")
         param_rivernet.filter.list = ["Polyline"]
         param_routeID_field.parameterDependencies = [param_rivernet.name]
-        param_routeID_field.value = "RID"
+        #param_routeID_field.value = "RID"
         param_downstream_reach_field.parameterDependencies = [param_rivernet.name]
-        param_downstream_reach_field.value = "DownEnd"
+        #param_downstream_reach_field.value = "DownEnd"
         param_channeltype_field.parameterDependencies = [param_rivernet.name]
-        param_channeltype_field.value = "Main"
-        param_route_shapefile.value = os.path.join(project_path, "Geometry.gdb", "routes")
-        param_routelinks_table.value = os.path.join(project_path, "Geometry.gdb", "routes_links")
+        #param_channeltype_field.value = "Main"
+        #param_route_shapefile.value = os.path.join(project_path, "Geometry.gdb", "routes")
+        #param_routelinks_table.value = os.path.join(project_path, "Geometry.gdb", "routes_links")
 
         param_rivernet.category = "Parameters"
         param_routeID_field.category = "Parameters"
@@ -96,6 +96,13 @@ class CreateTreeFromShapefile(object):
 
     def updateParameters(self, parameters):
         project_path = arcpy.env.workspace
+        if ((not parameters[1].hasBeenValidated and parameters[1].altered) or
+                (not parameters[2].hasBeenValidated and parameters[2].altered) or
+                (not parameters[3].hasBeenValidated and parameters[3].altered) or
+                (not parameters[4].hasBeenValidated and parameters[4].altered) or
+                (not parameters[5].hasBeenValidated and parameters[5].altered) or
+                (not parameters[6].hasBeenValidated and parameters[6].altered)):
+            parameters[0].value = "Custom"
         if not parameters[0].hasBeenValidated:
             if parameters[0].valueAsText == "Main channel only":
                 parameters[1].value = os.path.join(project_path, "Geometry.gdb", "linear_main_d")
