@@ -19,6 +19,7 @@ from LisfloodDataConversion_Interface import *
 from CreateZones_Interface import *
 from DefBci_Interface import *
 from SpatializeQflood_from_gauging_stations_Interface import *
+from RunSim_Qlisted_Interface import *
 
 class Toolbox(object):
     def __init__(self):
@@ -30,4 +31,4 @@ class Toolbox(object):
                       CreateFromPointsAndSplits, TreeFromFlowDir, PlacePointsAlongReaches, ExtractWaterSurface,
                       SpatializeQLiDAR_gauging_stations, AssignPointToClosestPointOnRoute, LargeurParTransect,
                       WidthPostProc, BedAssessment, LisfloodDataConversion, DefBciWithLateralWlakes_hdown,
-                      CreateZonesWlakes, SpatializeQflood_gauging_stations]
+                      CreateZonesWlakes, SpatializeQflood_gauging_stations, RunSim_LISFLOOD]
