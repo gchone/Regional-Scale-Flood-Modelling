@@ -106,7 +106,7 @@ class DefBciWithLateralWlakes_hdown(object):
         # restrict workspace selection to filesystem
         param0.filter.list = ["File System"]
 
-        # Determine project root from arcpy env, with sensible fallbacks
+        # Determine project root from arcpy env
         project_root = arcpy.env.workspace
 
         # Common dataset locations used across this toolbox
@@ -114,13 +114,12 @@ class DefBciWithLateralWlakes_hdown(object):
         param_flowacc.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_facc")
         param_zones.value = os.path.join(project_root, "Tiles")
         param_dem.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_avg")
-        # D4 outputs produced by LisfloodDataConversion/I/O
-        param_width.value = os.path.join(project_root, "Lisflood_inputs.gdb", "width_lisflood")
-        param_zbed.value = os.path.join(project_root, "Lisflood_inputs.gdb", "bathy_lisflood")
-        param_manning.value = os.path.join(project_root, "Lisflood_inputs.gdb", "n_floodplain")
-        # channel mask common location
-        param_mask.value = os.path.join(project_root, "Lisflood_inputs.gdb", "mask")
-        # default output folder: project_root / Lisflood_inputs
+
+        param_width.value = os.path.join(project_root, "Lisflood_inputs", "width_lisflood.tif")
+        param_zbed.value = os.path.join(project_root, "Lisflood_inputs", "bathy_lisflood.tif")
+        param_manning.value = os.path.join(project_root, "Lisflood_inputs", "n_floodplain.tif")
+        param_mask.value = os.path.join(project_root, "Lisflood_inputs", "mask.tif")
+
         param_output.value = os.path.join(project_root, "Sims")
 
         param0.value =  os.path.join(project_root, "temp")

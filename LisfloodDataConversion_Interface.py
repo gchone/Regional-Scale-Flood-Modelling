@@ -182,8 +182,8 @@ class LisfloodDataConversion(object):
         param_linksD4.value = os.path.join(project_root, "Lisflood_inputs.gdb", "linksD4")
         param_pathpointsD4.value = os.path.join(project_root, "Lisflood_inputs.gdb", "pathpointsD4")
         param_D4fd_net_relatetable.value = os.path.join(project_root, "Lisflood_inputs.gdb", "d4fd_net_relatetable")
-        param_bathy_output_raster.value = os.path.join(project_root, "Lisflood_inputs.gdb", "bathy_lisflood")
-        param_width_output_raster.value = os.path.join(project_root, "Lisflood_inputs.gdb", "width_lisflood")
+        param_bathy_output_raster.value = os.path.join(project_root, "Lisflood_inputs", "bathy_lisflood.tif")
+        param_width_output_raster.value = os.path.join(project_root, "Lisflood_inputs", "width_lisflood.tif")
 
         return [param_lidar10m_fd, param_lidar10m_fill, param_from_pts, param_workspace,
                 param_routes_main, param_routes_main_links, param_routes_RID_field, param_routes_QOrder_field,
