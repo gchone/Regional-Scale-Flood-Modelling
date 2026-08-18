@@ -6,21 +6,10 @@
 # Concordia University
 # Geography, Planning and Environment Department
 # guenole.chone@concordia.ca
-# Fevrier 2019
 #####################################################
 
-# v1.1 - 10 mai 2018 - Correction des problèmes de zones dupliquées aux confluences (due aux segments d'un pixel de
-#   long). Correction des longueurs des segments aux confluences.
-# v1.2 - 28 février 2019 - Suppression des coupures aux confluences, ajout des coupures aux lacs.
-# v1.3 - septembre 2019 - Coupure nette des rasters aux lacs + ajout du critère de pente
-# v1.4 - octobre 2019 - Debug : problème de coupure des lacs avec multi fp, problème si zone de lac trop courte
-# v1.5 - fevrier 2020 - Debug : problème de clip pour les confluent des segments coupé par les lacs
-# v1.6 - mai 2020 - Coupure pour SUB et SUPER GC - Séparation interface et metier - Suppression de l'utilisation de la hauteur des lacs
-#    - suppression de l'utilisation du DEM et ouput sous forme de shapefiles (sourcepoints.shp et polyzones.shp)
-# v1.7 - juillet 2020 - Coupure pour SUB et SUPER GC supprimé: distinction faite par le masque
-# v1.8 - aout 2020 - pente optionnelle
-
 from RasterIO import *
+import os
 
 class pointflowpath:
    pass
@@ -29,7 +18,8 @@ class pointflowpath:
 
 def execute_CreateZone(r_flowdir, str_lakes, r_slope, minslope, str_frompoint, distance, bufferw, str_zonesfolder, messages):
 
-
+    if not os.path.isdir(str_zonesfolder):
+        os.makedirs(str_zonesfolder)
 
     str_segments = str_zonesfolder + "\\segments"
     str_linesegments = str_zonesfolder + "\\line_segments.shp"

@@ -8,9 +8,65 @@ from LocatePointsAlongRoutes import *
 from AssignPointToClosestPointOnRoute import *
 from InterpolatePoints import *
 from WSsmoothing import *
+from D8toD4 import *
 import ArcpyGarbageCollector as gc
+from tree.TreeTools import *
 from numpy.lib import recfunctions as rfn
 import csv
+
+def execute_WatershedScaleDEMprocessing(DEM, streams_toburn, streamspoly_toburn, rivernet, rivernet_main, toburn_frompoly, toburn_fromlines,
+                                        s_burned, s_fill, s_flow_dir, s_flow_acc, routes, routes_links, routes_main, routes_main_links,
+                                        routeD8, linksD8, pathpointsD8, fd_net_relatetable, RID_field, DownEnd_field, Main_field,
+                                        Qorder_field, messages):
+    ### Creates:
+    # - Mask.gdb\frompoly
+    # - 10mDEMs.gdb\net_lines
+    # - 10mDEMs.gdb\lidar10m_burn
+    # - 10mDEMs.gdb\lidar10m_fill
+    # - 10mDEMs.gdb\lidar10m_fd
+    # - 10mDEMs.gdb\lidar10m_facc
+    # - Geometry.gdb\routes_main
+    # - Geometry.gdb\routes_main_links
+    # - Geometry.gdb\routes
+    # - Geometry.gdb\routes_links
+    # - Geometry.gdb\routesD8
+    # - Geometry.gdb\linksD8
+    # - Geometry.gdb\pathpointsD8
+    # - Geometry.gdb\fd_net_relatetable
+
+    arcpy.env.cellSize = DEM.catalogPath
+    arcpy.env.snapRaster = DEM.catalogPath
+    arcpy.env.extent = DEM.catalogPath
+    arcpy.env.outputCoordinateSystem = DEM.catalogPath
+
+    messages.addMessage("Stream-burning DEM..")
+
+    arcpy.conversion.PolygonToRaster(streamspoly_toburn, arcpy.Describe(streamspoly_toburn).OIDFieldName, toburn_frompoly, cellsize = DEM)
+    arcpy.conversion.PolylineToRaster(streams_toburn, arcpy.Describe(streams_toburn).OIDFieldName, toburn_fromlines, cellsize = DEM)
+
+    burned_frompoly = arcpy.sa.Con( arcpy.sa.IsNull(toburn_frompoly), DEM, DEM-100)
+    burned = arcpy.sa.Con( arcpy.sa.IsNull(toburn_fromlines), burned_frompoly, DEM-200)
+    burned.save(s_burned)
+
+    messages.addMessage("Hydraulic processing of DEM...")
+
+    fill = arcpy.sa.Fill(burned)
+    fill.save(s_fill)
+    flow_dir = arcpy.sa.FlowDirection(fill)
+    flow_dir.save(s_flow_dir)
+    flow_acc = arcpy.sa.FlowAccumulation(flow_dir)
+    flow_acc.save(s_flow_acc)
+
+    messages.addMessage("Identifying river networks...")
+    execute_CreateTreeFromShapefile(rivernet, routes, routes_links, RID_field, DownEnd_field,
+                                    messages, Main_field)
+    execute_CreateTreeFromShapefile(rivernet_main, routes_main, routes_main_links, RID_field, DownEnd_field,
+                                    messages, None)
+
+    execute_FlowDirNetwork(routes_main, routes_main_links, RID_field, flow_dir, routeD8, linksD8, pathpointsD8, fd_net_relatetable, messages)
+
+    execute_OrderReaches(routes_main, routes_main_links, RID_field, flow_acc, routeD8, linksD8, pathpointsD8, fd_net_relatetable, Qorder_field, messages)
+
 
 def execute_FlowDirNetwork(routes, links, RID_field, r_flow_dir, routeD8, linksD8, ptsonD8, relatetable, messages):
     fp = gc.CreateScratchName("fp", data_type="FeatureClass", workspace="in_memory")
@@ -47,33 +103,41 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
     # 2021-10-19 Assignation of elevation on points on routes (AssignPointToClosestPointOnRoute) done by "2-WAY CLOSEST" instead of "MEAN"
     #  relate table externalised, and inverted
 
-    #relatetable = gc.CreateScratchName("relatetable", data_type="ArcInfoTable", workspace="in_memory")
-    #execute_RelateNetworks(routes, RID_field, routes_3m, RID_field_3m, relatetable, messages)
     RID_field_in_relatetable = [f.name for f in arcpy.Describe(relatetable).fields][2]
-    #RID3m_field_in_relatetable = [f.name for f in arcpy.Describe(relatetable).fields][-2]
 
-    arcpy.MakeXYEventLayer_management (pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
-    arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
+    try:
+        # Using ExtractMultiValuesToPoints on an event layer add a field in the input table
+        # To prevent that, a copy must be previously made
+        tmp_pts_table = gc.CreateScratchName("pts_table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
+        arcpy.management.Copy(pts_table, tmp_pts_table)
+        arcpy.MakeXYEventLayer_management (tmp_pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
+        arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
 
-    arcpy.AddJoin_management("pts_layer", RID_field_3m, relatetable, RID_field_3m)
+        arcpy.AddJoin_management("pts_layer", RID_field_3m, relatetable, RID_field_3m)
 
-    pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
+        pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
 
-    lidar3m_forws_basename = str(arcpy.Describe(lidar3m_cor).basename)
+        lidar3m_forws_basename = str(arcpy.Describe(lidar3m_cor).basename)
 
-    execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_forws_basename],
-                                             routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
-                                             [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
-                                             [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
-    pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
-    execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
+        execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_forws_basename],
+                                                 routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
+                                                 [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
+                                                 [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
+        pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
+        execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
 
-    arcpy.MakeRouteEventLayer_lr(routes, RID_field, pts_interpolated, pts_bathy_RID_field + " POINT "+pts_bathy_dist_field, "interpolated_lyr")
+        arcpy.MakeRouteEventLayer_lr(routes, RID_field, pts_interpolated, pts_bathy_RID_field + " POINT "+pts_bathy_dist_field, "interpolated_lyr")
 
-    interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
-    arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
+        interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
+        arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
 
-    execute_WSprocessing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_forws_basename, DEMs_field, ouput_table, messages)
+        temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+        execute_WSprocessing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_forws_basename, DEMs_field, temp_outtable, messages)
+
+        arcpy.MakeRouteEventLayer_lr(routes, RID_field, temp_outtable, pts_bathy_RID_field + " POINT " + pts_bathy_dist_field, "D8pts_lyr")
+        arcpy.CopyFeatures_management("D8pts_lyr", ouput_table)
+    finally:
+        gc.CleanAllTempFiles()
 
 def execute_ExtractDischarges(routes_Atlas, links_Atlas, RID_field_Atlas, routes_AtlasD8, links_AtlasD8, RID_field_AtlasD8, pts_D8, fpoints_atlas, routesD8, routeD8_RID, routes_main, route_main_RID, relate_table, r_flowacc, outpoints_D8, outpoints_route, messages):
 
@@ -264,17 +328,23 @@ def execute_SpatializeQ(route_D8, RID_field_D8, D8pathpoints, relate_table, r_fl
     #     arcpy.Delete_management(output_points)
     # arcpy.da.NumPyArrayToTable(finalarray, output_points)
 
-def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints, id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints, RID_Qpoints, dist_field_Qpoints, Q_field, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef, output_points, messages):
+def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8, D8pathpoints, r_flowacc, Qpoints,
+                                              id_field_Qpoints, name_field_Qpoints, drainage_area_field_Qpoints,
+                                              Q_field, points_tol, Qcsv_file, DEM_footprints, DEM_id_field, beta_coef,
+                                              relatetable, output_points, messages):
     # Two cases :
     # - either Q_field is a field in the Q points with the discharges to spatialize (DEM_footprints and Qcsv_file must be None).
     #   This is used to spatialize flood discharges
     # - Qcsv_file provides multiple discharges, and the right discharge to use is indicated by the DEM_footprints
     #   This is used to spatialize LiDAR discharges
+    # NoData values are supported in the csv file: a gauging station can be missing a value for some discharges.
+    #   upQpts and downQpts are therefore dictionaries (key = discharge name), since the closest upstream/downstream
+    #   gauging point(s) usable for the interpolation can differ from one discharge to another.
 
     class Ref_point:
         def __init__(self, name, discharges, drainage_area, reach, dist):
             self.name = name
-            self.discharges = discharges
+            self.discharges = discharges # dict {discharge_name: value}. Only discharges with actual data are present
             self.drainage_area = drainage_area
             self.reach = reach
             self.dist = dist
@@ -289,6 +359,10 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
         D8pts_withDEM = gc.CreateScratchName("D8ptsDEM", data_type="FeatureClass", workspace="in_memory")
         arcpy.SpatialJoin_analysis(D8pts, DEM_footprints, D8pts_withDEM)
 
+    # Project points on the D8 network
+    Qpoints_locatetable = gc.CreateScratchName("points", data_type="ArcInfoTable", workspace="in_memory")
+    arcpy.LocateFeaturesAlongRoutes_lr(Qpoints, routes_D8, RID_field_D8, points_tol, Qpoints_locatetable,
+                                       RID_field_D8 + " POINT MEAS")
 
     network = RiverNetwork()
     network.dict_attr_fields['id'] = RID_field_D8
@@ -296,13 +370,13 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
 
     Qcollection = Points_collection(network, "Qpts")
     Qcollection.dict_attr_fields['id'] = id_field_Qpoints
-    Qcollection.dict_attr_fields['reach_id'] = RID_Qpoints
-    Qcollection.dict_attr_fields['dist'] = dist_field_Qpoints
+    Qcollection.dict_attr_fields['reach_id'] = RID_field_D8
+    Qcollection.dict_attr_fields['dist'] = "MEAS"
     Qcollection.dict_attr_fields['name'] = name_field_Qpoints
     Qcollection.dict_attr_fields['drainage_area'] = drainage_area_field_Qpoints
     if Q_field is not None:
         Qcollection.dict_attr_fields['discharge'] = Q_field
-    Qcollection.load_table(Qpoints)
+    Qcollection.load_table(Qpoints_locatetable)
 
     targetcollection = Points_collection(network, "target")
     targetcollection.dict_attr_fields['id'] = "id"
@@ -327,8 +401,10 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
             for line in csvreader:
                 discharges_list.append(line[firstrowname])
                 for station in csvreader.fieldnames[1:]:
-                    Q_dict[station][line[firstrowname]] = float(line[station])
-        # For each gauging station point, assign its dictionnary of discharges
+                    if line[station] is not None and line[station] != '' and float(line[station]) != -999 and float(line[station]) != -9999: # to avoid missing data (NoData)
+                        Q_dict[station][line[firstrowname]] = float(line[station])
+        # For each gauging station point, assign its dictionnary of discharges (a station may be missing some
+        #  discharges if the csv file has NoData/empty values for it)
         for reach in network.browse_reaches_down_to_up():
             for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
                 try:
@@ -337,129 +413,259 @@ def execute_SpatializeQ_from_gauging_stations(routes_D8, links_D8, RID_field_D8,
                     messages.addErrorMessage("Missing gauging station in the csv file: " + str(Qpts.name))
     else:
         # In the case of only discharges being a field in the gauging station file, format things the same way:
+        discharges_list = [Q_field]
         for reach in network.browse_reaches_down_to_up():
             for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
                 Qpts.discharges = {Q_field: Qpts.discharge}
             for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
                 targetpt.DEM = Q_field
 
-    # First browse: assign the upstream Q point(s) (in a list)
+    # Initialize the per-target-point attributes once (upQpts/downQpts are dictionaries, keyed by discharge, so
+    #  that each discharge can independently have (or not have) an upstream/downstream reference point)
     for reach in network.browse_reaches_down_to_up():
         for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
-            targetpt.upQpts = [] # just to initiate the lists
-    for reach in network.browse_reaches_up_to_down():
-        if reach.is_upstream_end():
-            lastQpts = None
-        for Qpts in reach.browse_points(Qcollection, orientation="UP_TO_DOWN"):
+            targetpt.upQpts = {}
+            targetpt.downQpts = {}
+            targetpt.weightedQ = {}
+            targetpt.computedQLiDAR = -999
+
+    # First browse: assign the upstream Q point(s) (in a list), separately for each discharge, since a gauging
+    #  station missing a value (NoData) for a given discharge must be skipped only for that discharge
+    for discharge in discharges_list:
+        for reach in network.browse_reaches_up_to_down():
+            if reach.is_upstream_end():
+                lastQpts = None
+            for Qpts in reach.browse_points(Qcollection, orientation="UP_TO_DOWN"):
+                if discharge not in Qpts.discharges: # NoData for this discharge: this station is ignored for it
+                    continue
+                if lastQpts is not None:
+                    if lastQpts.reach.id == reach.id:
+                        max_dist = lastQpts.dist
+                    else:
+                        max_dist = None
+                    for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
+                        if discharge not in targetpt.upQpts:
+                            targetpt.upQpts[discharge] = [] # just to initiate the lists
+                        if (max_dist is None or targetpt.dist <= max_dist) and targetpt.dist > Qpts.dist:
+                            if lastQpts.name not in [pt.name for pt in targetpt.upQpts[discharge]]:
+                                targetpt.upQpts[discharge].append(lastQpts)
+                lastQpts = Ref_point(Qpts.name, Qpts.discharges, Qpts.drainage_area, Qpts.reach, Qpts.dist)
+
             if lastQpts is not None:
+                # Assign the lastQpts to target points until the end of the reach
                 if lastQpts.reach.id == reach.id:
                     max_dist = lastQpts.dist
                 else:
                     max_dist = None
                 for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
-                    if (max_dist is None or targetpt.dist <= max_dist) and targetpt.dist > Qpts.dist:
-                        if lastQpts.name not in [pt.name for pt in targetpt.upQpts]:
-                            targetpt.upQpts.append(lastQpts)
-            lastQpts = Ref_point(Qpts.name, Qpts.discharges, Qpts.drainage_area, Qpts.reach, Qpts.dist)
-
-        if lastQpts is not None:
-            # Assign the lastQpts to target points until the end of the reach
-            if lastQpts.reach.id == reach.id:
-                max_dist = lastQpts.dist
-            else:
-                max_dist = None
-            for targetpt in reach.browse_points(targetcollection, orientation="UP_TO_DOWN"):
-                if max_dist is None or targetpt.dist <= max_dist:
-                    if lastQpts.name not in [pt.name for pt in targetpt.upQpts]:
-                        targetpt.upQpts.append(lastQpts)
+                    if discharge not in targetpt.upQpts:
+                        targetpt.upQpts[discharge] = []
+                    if max_dist is None or targetpt.dist <= max_dist:
+                        if lastQpts.name not in [pt.name for pt in targetpt.upQpts[discharge]]:
+                            targetpt.upQpts[discharge].append(lastQpts)
 
 
     # Second browse: assign the closest downstream Q point at each target point
     # In the same browse, compute the discharges, by linear interpolation between each upstream/downstream pairs
     # If there are several upstream points, weight the results according to the upstream points drainage area
     # The final upstream point of a reach act as an input Q point for the upstream reaches
-    for reach in network.browse_reaches_down_to_up():
+    # Everything is done separately for each discharge: the closest upstream/downstream gauging point (and whether
+    #  there is one at all) can differ between discharges when NoData values are present in the csv file
+    for discharge in discharges_list:
+        for reach in network.browse_reaches_down_to_up():
 
-        ### First block : find the closest downstream Q point ###
+            ### First block : find the closest downstream Q point ###
 
-        lastQpts = None
-        if not reach.is_downstream_end():
-            lastQpts = reach.get_downstream_reach().upstream_calculated_Q
+            lastQpts = None
+            if not reach.is_downstream_end():
+                down_calculated_Q = reach.get_downstream_reach().upstream_calculated_Q
+                if discharge in down_calculated_Q.discharges:
+                    lastQpts = down_calculated_Q
 
-        # Is there a discharge point on the current reach?
-        for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
+            # Is there a discharge point on the current reach?
+            for Qpts in reach.browse_points(Qcollection, orientation="DOWN_TO_UP"):
+                if discharge not in Qpts.discharges: # NoData for this discharge: this station is ignored for it
+                    continue
+                if lastQpts is not None:
+                    if lastQpts.reach.id == reach.id:
+                        min_dist = lastQpts.dist
+                    else:
+                        min_dist = 0
+                    for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+                        if targetpt.dist >= min_dist:
+                            targetpt.downQpts[discharge] = lastQpts
+                lastQpts = Ref_point(Qpts.name, Qpts.discharges, Qpts.drainage_area, Qpts.reach, Qpts.dist)
+
             if lastQpts is not None:
+                # Assign the lastQpts to target points until the end of the reach
                 if lastQpts.reach.id == reach.id:
                     min_dist = lastQpts.dist
                 else:
                     min_dist = 0
                 for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
                     if targetpt.dist >= min_dist:
-                        targetpt.downQpts = lastQpts
-            lastQpts = Ref_point(Qpts.name, Qpts.discharges, Qpts.drainage_area, Qpts.reach, Qpts.dist)
+                        targetpt.downQpts[discharge] = lastQpts
 
-        if lastQpts is not None:
-            # Assign the lastQpts to target points until the end of the reach
-            if lastQpts.reach.id == reach.id:
-                min_dist = lastQpts.dist
-            else:
-                min_dist = 0
+
+            ### Second block : compute the discharges ###
+
             for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
-                if targetpt.dist >= min_dist:
-                    targetpt.downQpts = lastQpts
 
+                localarea = targetpt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.
+                uppts = targetpt.upQpts.get(discharge, [])
+                downpt = targetpt.downQpts.get(discharge)
 
-        ### Second block : compute the discharges ###
+                if downpt is None: # there is no downstream point (for this discharge)
+                    # A simple proportionnality of A**beta is done for each upstream point
+                    for uppt in uppts:
+                        uppt.interpolatedQ = uppt.discharges[discharge]*(localarea/uppt.drainage_area)**beta_coef
+                else:
+                    # Linear interpolation of A**beta
+                    for uppt in uppts:
+                        Q_from_down = (localarea ** beta_coef - uppt.drainage_area ** beta_coef) / (
+                                    downpt.drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*downpt.discharges[discharge]
+                        Q_from_up = (downpt.drainage_area ** beta_coef - localarea ** beta_coef) / (
+                                downpt.drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*uppt.discharges[discharge]
 
-        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+                        uppt.interpolatedQ = Q_from_down + Q_from_up
 
-            localarea = targetpt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.
-            if not hasattr(targetpt, "downQpts"): # there is no downstream point
-                # A simple proportionnality of A**beta is done for each upstream point
-                for uppt in targetpt.upQpts:
-                    uppt.interpolatedQ = {Qupkey:uppt.discharges[Qupkey]*(localarea/uppt.drainage_area)**beta_coef for Qupkey in uppt.discharges}
-            else:
-                # Linear interpolation of A**beta
-                for uppt in targetpt.upQpts:
-                    Q_from_down = {Qdownkey:(localarea ** beta_coef - uppt.drainage_area ** beta_coef) / (
-                                targetpt.downQpts.drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*targetpt.downQpts.discharges[Qdownkey] for Qdownkey in targetpt.downQpts.discharges}
-                    Q_from_up = {Qupkey:(targetpt.downQpts.drainage_area ** beta_coef - localarea ** beta_coef) / (
-                                targetpt.downQpts.drainage_area ** beta_coef - uppt.drainage_area ** beta_coef)*uppt.discharges[Qupkey] for Qupkey in uppt.discharges}
-
-                    uppt.interpolatedQ = {Qdownkey:Q_from_down[Qdownkey] + Q_from_up[Qdownkey] for Qdownkey in targetpt.downQpts.discharges}
-
-            # weight the results according to the upstream points drainage area
-            if len(targetpt.upQpts)>0:
-                targetpt.weightedQ = {Qupkey:0 for Qupkey in targetpt.upQpts[0].discharges}
-                totalweight = sum([uppt.drainage_area for uppt in targetpt.upQpts])
-                for uppt in targetpt.upQpts:
-                    targetpt.weightedQ = {Qupkey:targetpt.weightedQ[Qupkey] + uppt.interpolatedQ[Qupkey]*uppt.drainage_area/totalweight for Qupkey in uppt.discharges}
-            else: # there is no upstream points
-                if hasattr(targetpt, "downQpts"): # there is a downstream point
+                # weight the results according to the upstream points drainage area
+                if len(uppts) > 0:
+                    weighted_value = 0
+                    totalweight = sum([uppt.drainage_area for uppt in uppts])
+                    for uppt in uppts:
+                        weighted_value += uppt.interpolatedQ*uppt.drainage_area/totalweight
+                    targetpt.weightedQ[discharge] = weighted_value
+                elif downpt is not None: # there is no upstream point, but there is a downstream point
                     # A simple proportionnality of A**beta is done from the downstream point
-                    targetpt.weightedQ = {
-                        Qdownkey: targetpt.downQpts.discharges[Qdownkey] * (localarea / targetpt.downQpts.drainage_area) ** beta_coef for Qdownkey in targetpt.downQpts.discharges}
+                    targetpt.weightedQ[discharge] = downpt.discharges[discharge] * (localarea / downpt.drainage_area) ** beta_coef
+                # else: neither an upstream nor a downstream point exists for this discharge: no value can be
+                #  computed. targetpt.weightedQ[discharge] is simply left unset (NoData is propagated)
 
-            # Export the discharge corresponding to the local day (local DEM) (it needs to be an attribute)
-            if hasattr(targetpt, "weightedQ"):
+
+            ### Third block : Convert the final upstream point into a Q input ###
+            lastuppt = reach.get_last_point(targetcollection)
+            lastuppt_area = lastuppt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.
+            if not hasattr(reach, "upstream_calculated_Q"):
+                reach.upstream_calculated_Q = Ref_point("uppt_reach"+str(reach.id), {}, lastuppt_area, reach, lastuppt.dist)
+            else:
+                reach.upstream_calculated_Q.drainage_area = lastuppt_area
+                reach.upstream_calculated_Q.dist = lastuppt.dist
+            if discharge in lastuppt.weightedQ:
+                reach.upstream_calculated_Q.discharges[discharge] = lastuppt.weightedQ[discharge]
+
+    # Final selection: for each target point, keep the discharge value that corresponds to its own day (DEM)
+    for reach in network.browse_reaches_down_to_up():
+        for targetpt in reach.browse_points(targetcollection, orientation="DOWN_TO_UP"):
+            if targetpt.DEM in targetpt.weightedQ:
                 targetpt.computedQLiDAR = targetpt.weightedQ[targetpt.DEM]
             else:
+                if Q_field is None:
+                    messages.addWarningMessage("Missing day of discharge in the csv file: " + str(targetpt.DEM) +
+                                             " (if -9999, make sure that all points on route D8 fall within a DEM footprint polygon)")
                 targetpt.computedQLiDAR = -999
-
-
-
-
-        ### Third block : Convert the final upstream point into an Q input ###
-        lastuppt = reach.get_last_point(targetcollection)
-        reach.upstream_calculated_Q = Ref_point("uppt_reach"+str(reach.id), lastuppt.weightedQ,
-                                                lastuppt.flowacc*r_flowacc.meanCellWidth*r_flowacc.meanCellHeight/1000000.,
-                                                reach, lastuppt.dist)
 
     if Q_field is None:
         targetcollection.add_SavedVariable("computedQLiDAR", "float")
     else:
         targetcollection.add_SavedVariable("computedQLiDAR", "float", None, Q_field)
-    targetcollection.save_points(output_points)
 
+    temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+    targetcollection.save_points(temp_outtable)
+    arcpy.MakeRouteEventLayer_lr(routes_D8, RID_field_D8, temp_outtable, RID_field_D8 + " POINT dist", "D8pts_lyr")
+    original_fields = [f.name for f in arcpy.Describe(temp_outtable).fields]
+    if relatetable is not None:
+        relatetable_fields = [f.name for f in arcpy.Describe(relatetable).fields]
+        arcpy.management.AddJoin("D8pts_lyr", RID_field_D8, relatetable, relatetable_fields[2])
+        arcpy.CopyFeatures_management("D8pts_lyr", output_points)
+        aftercopy_fields = [f.name for f in arcpy.Describe(output_points).fields]
+        # Clean field names
+        for i, field in enumerate(original_fields):
+            if i>0: # keep the first OID field name
+                arcpy.AlterField_management(output_points, aftercopy_fields[i+1], field, field) # +1 because of the Shape field
+        arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+3], "RID_D8", "RID_D8")
+        arcpy.AlterField_management(output_points, aftercopy_fields[len(original_fields)+2], "RID_routesmain", "RID_routesmain")
+    else:
+        arcpy.CopyFeatures_management("D8pts_lyr", output_points)
 
+def execute_LisfloodDataConversion(
+    lidar10m_fd, lidar10m_fill, from_pts, workspace,
+    routes_main, routes_main_links, routes_RID_field, routes_QOrder_field,
+    bathy_pts, bathy_value_field, bathy_RID_field, bathy_dist_field, width_pts, width_value_field, width_RID_field, width_dist_field, d4fd, routesD4, linksD4,
+        pathpointsD4, D4fd_net_relatetable, bathy_output_raster, width_output_raster, messages):
+    # Create D4 network and spatialize bathymetry and width along this network
+    # Outputs are:
+    #   d4fd (Lisflood_inputs.gdb\d4fd): the D4 flow direction raster
+    #   routesD4 (Lisflood_inputs.gdb\routesD4): the D4 river network
+    #   linksD4 (Lisflood_inputs.gdb\linksD4): the D4 river network links
+    #   pathpointsD4 (Lisflood_inputs.gdb\pathpointsD4): the D4 river network pathpoints
+    #   D4fd_net_relatetable (Lisflood_inputs.gdb\D4fd_net_relatetable): the D4 network relate table
+    #   bathy_output_raster (Lisflood_inputs.gdb\bathy): raster of bathymetry values along the D4 network
+    #   width_output_raster (Lisflood_inputs.gdb\width): raster of width values along the D4 network
+
+    # Step 1: D4 flow direction
+    messages.addMessage('Extracting D4 flow direction network...')
+    with arcpy.EnvManager(scratchWorkspace=workspace):
+        execute_D8toD4(lidar10m_fd, lidar10m_fill, from_pts, d4fd, messages, language="EN")
+
+    d4fd = arcpy.Raster(d4fd)
+    # Step 2: Flow Direction Network
+    execute_FlowDirNetwork(routes_main, routes_main_links, routes_RID_field, d4fd, routesD4, linksD4, pathpointsD4, D4fd_net_relatetable, messages)
+
+    # Step 3: Add Qorder field
+    if routes_QOrder_field not in [f.name for f in arcpy.ListFields(routesD4)]:
+        arcpy.AddField_management(routesD4, routes_QOrder_field, 'SHORT')
+
+    # Step 4: Join D4fd_net_relatetable to routesD4, then join routes_main to routesD4
+    routesD4_lyr = arcpy.MakeFeatureLayer_management(routesD4, "routesD4_lyr")
+
+    relatetable_field = [f.name for f in arcpy.Describe(D4fd_net_relatetable).fields]
+    arcpy.management.AddJoin("routesD4_lyr", routes_RID_field, D4fd_net_relatetable, relatetable_field[2])
+    routesD4_mainRID = arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[1]
+    arcpy.management.AddJoin("routesD4_lyr", routesD4_mainRID, routes_main, routes_RID_field)
+
+    # Step 5: Copy Qorder values
+    arcpy.management.CalculateField("routesD4_lyr", routes_QOrder_field, '!'+ arcpy.Describe(routes_main).basename + "." + routes_QOrder_field +'!', 'PYTHON3')
+
+    # Step 6: Bed elevation workflow
+    messages.addMessage('Processing bathymetry...')
+    arcpy.MakeRouteEventLayer_lr(routes_main, routes_RID_field, bathy_pts, bathy_RID_field + ' Point ' + bathy_dist_field, "bathy_on_mainroute")
+    arcpy.AddJoin_management("bathy_on_mainroute", bathy_RID_field, D4fd_net_relatetable, routes_RID_field)
+    bathy_on_D4 = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_AssignPointToClosestPointOnRoute("bathy_on_mainroute", [bathy_value_field], routesD4, routes_RID_field,
+                                             pathpointsD4, 'RID', 'dist',
+                                             [arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[2]], [routes_RID_field], bathy_on_D4, "MAX")
+
+    bathy_final = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_InterpolatePoints(bathy_on_D4, 'id', 'RID', 'dist', [bathy_value_field],
+                              pathpointsD4, 'id', 'RID', 'dist', routesD4,
+                              linksD4, routes_RID_field, routes_QOrder_field, bathy_final)
+    bathy_final_events = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    arcpy.MakeRouteEventLayer_lr(routesD4, routes_RID_field, bathy_final, 'RID Point dist', bathy_final_events)
+
+    with arcpy.EnvManager(snapRaster=lidar10m_fd):
+        with arcpy.EnvManager(extent=lidar10m_fd):
+            with arcpy.EnvManager(outputCoordinateSystem=lidar10m_fd):
+                arcpy.PointToRaster_conversion(bathy_final_events, bathy_value_field, bathy_output_raster, cell_assignment='MOST_FREQUENT', priority_field=None, cellsize=lidar10m_fd)
+
+    # Step 7: Width workflow
+    messages.addMessage('Processing width...')
+    arcpy.MakeRouteEventLayer_lr(routes_main, routes_RID_field, width_pts, width_RID_field + ' Point ' + width_dist_field, "width_on_mainroute")
+    arcpy.AddJoin_management("width_on_mainroute", width_RID_field, D4fd_net_relatetable, routes_RID_field)
+    width_on_D4 = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_AssignPointToClosestPointOnRoute("width_on_mainroute", [width_value_field], routesD4, routes_RID_field,
+                                             pathpointsD4, 'RID', 'dist',
+                                             [arcpy.Describe(D4fd_net_relatetable).basename + "." + relatetable_field[2]], [routes_RID_field], width_on_D4, "MEAN")
+
+    width_final = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    execute_InterpolatePoints(width_on_D4, 'id', 'RID', 'dist', [width_value_field],
+                              pathpointsD4, 'id', 'RID', 'dist', routesD4,
+                              linksD4, routes_RID_field, routes_QOrder_field, width_final)
+    width_final_events = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
+    arcpy.MakeRouteEventLayer_lr(routesD4, routes_RID_field, width_final, 'RID Point dist', width_final_events)
+
+    with arcpy.EnvManager(snapRaster=lidar10m_fd):
+        with arcpy.EnvManager(extent=lidar10m_fd):
+            with arcpy.EnvManager(outputCoordinateSystem=lidar10m_fd):
+                arcpy.PointToRaster_conversion(width_final_events, width_value_field, width_output_raster, cell_assignment='MOST_FREQUENT', priority_field=None, cellsize=lidar10m_fd)
 

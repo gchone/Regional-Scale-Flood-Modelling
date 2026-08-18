@@ -9,6 +9,7 @@
 
 from LargeScaleFloodMetaTools import *
 
+
 class OrderReaches(object):
     def __init__(self):
         self.label = "Order reaches"
@@ -19,7 +20,7 @@ class OrderReaches(object):
         param_routes = arcpy.Parameter(
             displayName="Input route feature class (lines)",
             name="routes",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_links = arcpy.Parameter(
@@ -37,13 +38,13 @@ class OrderReaches(object):
         param_r_flowacc= arcpy.Parameter(
             displayName="Flow accumulation raster",
             name="r_flowacc",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_routeD8 = arcpy.Parameter(
             displayName="Input route D8 feature class (lines)",
             name="routeD8",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_linksD8 = arcpy.Parameter(
@@ -71,8 +72,19 @@ class OrderReaches(object):
             parameterType="Required",
             direction="Input")
 
-        param_RID_field.parameterDependencies = [param_routes.name]
+        project_path = arcpy.env.workspace
 
+        param_routes.filter.list = ["Polyline"]
+        param_routes.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
+        param_links.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
+        param_RID_field.parameterDependencies = [param_routes.name]
+        param_RID_field.value = "RID"
+        param_r_flowacc.value = os.path.join(project_path, "10mDEMs.gdb", "lidar10m_facc")
+        param_routeD8.value = os.path.join(project_path, "Geometry.gdb", "routesD8")
+        param_linksD8.value = os.path.join(project_path, "Geometry.gdb", "linksD8")
+        param_ptsonD8.value = os.path.join(project_path, "Geometry.gdb", "pathpointsD8")
+        param_relatetable.value = os.path.join(project_path, "Geometry.gdb", "fd_net_relatetable")
+        param_outputfield.value = "Qorder"
 
         params = [param_routes, param_links, param_RID_field, param_r_flowacc, param_routeD8, param_linksD8, param_ptsonD8, param_relatetable, param_outputfield]
 

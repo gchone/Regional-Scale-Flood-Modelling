@@ -19,13 +19,13 @@ class SpatializeQLiDAR_gauging_stations(object):
         param_r_flowacc = arcpy.Parameter(
             displayName="Flow Accumulation raster",
             name="r_flowacc",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_routes = arcpy.Parameter(
             displayName="Input D8 route feature class",
             name="routes",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_RID_field = arcpy.Parameter(
@@ -41,7 +41,7 @@ class SpatializeQLiDAR_gauging_stations(object):
             parameterType="Required",
             direction="Input")
         param_ptsonD8 = arcpy.Parameter(
-            displayName="Point on route D8 feature class (lines)",
+            displayName="Point on route D8",
             name="ptsonD8",
             datatype="GPTableView",
             parameterType="Required",
@@ -70,16 +70,10 @@ class SpatializeQLiDAR_gauging_stations(object):
             datatype="Field",
             parameterType="Required",
             direction="Input")
-        param_RID_Qpoints = arcpy.Parameter(
-            displayName="RID field in Qpoints",
-            name="RID_Qpoints",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
-        param_dist_field_Qpoints = arcpy.Parameter(
-            displayName="MEAS field in Qpoints ",
-            name="dist_field_Qpoints",
-            datatype="Field",
+        param_Qdistance = arcpy.Parameter(
+            displayName="Maximum distance of gauging stations to the river (m)",
+            name="Qdistance",
+            datatype="GPDouble",
             parameterType="Required",
             direction="Input")
         param_Qcsv_file = arcpy.Parameter(
@@ -91,7 +85,7 @@ class SpatializeQLiDAR_gauging_stations(object):
         param_DEMs_footprints = arcpy.Parameter(
             displayName="DEMs footprint feature class",
             name="DEMs_footprints",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_DEMs_field = arcpy.Parameter(
@@ -106,25 +100,45 @@ class SpatializeQLiDAR_gauging_stations(object):
             datatype="GPDouble",
             parameterType="Required",
             direction="Input")
-        param_output_points = arcpy.Parameter(
-            displayName="Points Output table",
-            name="output_points",
+        param_relatetable = arcpy.Parameter(
+            displayName="Relate table - Main routes to D8 correspondence",
+            name="relatetable",
             datatype="GPTableView",
+            parameterType="Required",
+            direction="Input")
+        param_output_points = arcpy.Parameter(
+            displayName="Output: Points with spatialized Q",
+            name="output_points",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
+        project_path = arcpy.env.workspace
+
+        param_r_flowacc.value = os.path.join(project_path, "10mDEMs.gdb", "lidar10m_facc")
+        param_routes.filter.list = ["Polyline"]
+        param_routes.value = os.path.join(project_path, "Geometry.gdb", "routesD8")
         param_RID_field.parameterDependencies = [param_routes.name]
+        param_RID_field.value = "RID"
+        param_links.value = os.path.join(project_path, "Geometry.gdb", "linksD8")
+        param_ptsonD8.value = os.path.join(project_path, "Geometry.gdb", "pathpointsD8")
+        param_Qpoints.value = os.path.join(project_path, "Gauging_stations.gdb", "QStations _D8")
         param_id_field_Qpoints.parameterDependencies = [param_Qpoints.name]
-        param_RID_Qpoints.parameterDependencies = [param_Qpoints.name]
+        param_id_field_Qpoints.value = "OBJECTID"
         param_name_Qpoints.parameterDependencies = [param_Qpoints.name]
         param_drainage_Qpoints.parameterDependencies = [param_Qpoints.name]
-        param_dist_field_Qpoints.parameterDependencies = [param_Qpoints.name]
-
+        param_Qdistance.value = 500.0
+        param_DEMs_footprints.filter.list = ["Polygon"]
+        param_DEMs_footprints.value = os.path.join(project_path, "Geometry.gdb", "DEM_footprints")
         param_DEMs_field.parameterDependencies = [param_DEMs_footprints.name]
+        param_DEMs_field.value = "ID_DEM"
+        param_beta.value = 1.0
+        param_relatetable.value = os.path.join(project_path, "Geometry.gdb", "fd_net_relatetable")
+        param_output_points.value = os.path.join(project_path, "Discharge.gdb", "Qpts_spatialized_D8")
 
         params = [param_r_flowacc, param_routes, param_RID_field, param_links, param_ptsonD8, param_Qpoints,
-                  param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_RID_Qpoints,
-                  param_dist_field_Qpoints, param_Qcsv_file, param_DEMs_footprints, param_DEMs_field, param_beta, param_output_points]
+                  param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_Qdistance, param_Qcsv_file,
+                  param_DEMs_footprints, param_DEMs_field, param_beta, param_relatetable, param_output_points]
         return params
 
     def isLicensed(self):
@@ -146,17 +160,17 @@ class SpatializeQLiDAR_gauging_stations(object):
         id_field_Qpoints = parameters[6].valueAsText
         name_Qpoints = parameters[7].valueAsText
         drainage_Qpoints = parameters[8].valueAsText
-        RID_Qpoints = parameters[9].valueAsText
-        dist_field_Qpoints = parameters[10].valueAsText
-        csv_file = parameters[11].valueAsText
-        DEM_footprints = parameters[12].valueAsText
-        DEM_fottprints_idfield = parameters[13].valueAsText
-        beta_coef = float(parameters[14].valueAsText)
+        Qdistance = float(parameters[9].valueAsText)
+        csv_file = parameters[10].valueAsText
+        DEM_footprints = parameters[11].valueAsText
+        DEM_fottprints_idfield = parameters[12].valueAsText
+        beta_coef = float(parameters[13].valueAsText)
+        relatetable = parameters[14].valueAsText
         output_points = parameters[15].valueAsText
 
         execute_SpatializeQ_from_gauging_stations(routes, links, RID_field, D8pathpoints, r_flowacc, Qpoints,
-                                                  id_field_Qpoints, name_Qpoints, drainage_Qpoints, RID_Qpoints,
-                                                  dist_field_Qpoints, None, csv_file, DEM_footprints,
-                                                  DEM_fottprints_idfield, beta_coef, output_points, messages)
+                                                  id_field_Qpoints, name_Qpoints, drainage_Qpoints, None, Qdistance,
+                                                  csv_file, DEM_footprints,
+                                                  DEM_fottprints_idfield, beta_coef, relatetable, output_points, messages)
 
         return

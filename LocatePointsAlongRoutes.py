@@ -27,13 +27,8 @@ def execute_LocatePointsAlongRoutes(points, points_RIDfield, routes, routes_RIDf
         arcpy.SelectLayerByAttribute_management("pts_layer", "NEW_SELECTION", points_RIDfield + " = "+ str(reach[0]))
         arcpy.SelectLayerByAttribute_management("route_layer", "NEW_SELECTION", routes_RIDfield + " = "+ str(reach[0]))
         table = gc.CreateScratchName("net"+str(i), data_type="ArcInfoTable", workspace="in_memory")
-        arcpy.lr.LocateFeaturesAlongRoutes("pts_layer", "route_layer", "RID", distance, table, routes_RIDfield+" POINT MEAS")
+        # Use the provided routes_RIDfield when locating features along routes (was hardcoded to 'RID')
+        arcpy.lr.LocateFeaturesAlongRoutes("pts_layer", "route_layer", routes_RIDfield, distance, table, routes_RIDfield+" POINT MEAS")
         list_tables.append(table)
 
     arcpy.Merge_management(list_tables, output)
-
-
-
-
-
-

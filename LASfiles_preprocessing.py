@@ -52,6 +52,9 @@ def execute_extract_bydays(str_lasfolder, UTC, output_folder):
             # Split and save LAS files by day
             for day in unique_days:
                 mask = np.array([dt.date() == day for dt in datetimes])
+                if mask.sum() == 0:
+                    print(f"Skipping {file} for day {day}: no points.")
+                    continue
                 sub_las = laspy.create(point_format=las.header.point_format, file_version=las.header.version)
                 sub_las.points = las.points[mask]
                 output_filename = os.path.join(output_folder, str(day), file)
@@ -98,7 +101,7 @@ def execute_groundclassification(str_binlastoolsfolder, input_folder, ground_fol
             os.makedirs(outputfolder)
 
         p = subprocess.Popen(
-            [str_binlastoolsfolder + "\\lasground_new64.exe", "-i", os.path.join(input_folder, folder, "*.la?"), "-odir",
+            [str_binlastoolsfolder + "\\lasground_new64.exe", "-demo", "-i", os.path.join(input_folder, folder, "*.la?"), "-odir",
              outputfolder, "-keep_class", "2"], cwd=input_folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         out, err = p.communicate()  # make the script wait for the lasground to be done
 
@@ -221,6 +224,16 @@ def execute_convertbytile(input_folder, output_folder, ref_raster, cellsize = No
             result = subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True,
                                     capture_output=True)
 
+            # Fill voids using python-GDAL
+            # That could also be done with scipy.interpolate.griddata. I haven't tried yet.
+            driver = gdal.GetDriverByName('GTiff')
+            filled_rasterfile = os.path.splitext(output_rasterfile)[0] + "_filled.tif"
+            dataset = gdal.Open(output_rasterfile)
+            filled_dataset = driver.CreateCopy(filled_rasterfile, dataset, 0)
+            gdal.FillNodata(targetBand=filled_dataset.GetRasterBand(1), maskBand=None,
+                            maxSearchDist=1000, smoothingIterations=0)
+            print(filled_rasterfile + " created")
+
 
 def execute_mergelas(input_folder, output_folder):
     # Merge all LAS files by day of LiDAR acquisition into a single LAS file per day.
@@ -251,7 +264,7 @@ def execute_mergelas(input_folder, output_folder):
         # Run PDAL pipeline
         subprocess.run(["pdal", "pipeline", "--stdin"], input=json.dumps(pipeline), text=True)
 
-def execute_lastoraster(input_folder, output_folder, cellsize):
+def execute_lastoraster(input_folder, output_folder, footprint_folder, cellsize):
     # Convert LAS files into DEMs by creating a TIN from the LAS points and then interpolating the TIN to create a raster.
     # To be used after execute_mergelas
     las_files = [f for f in os.listdir(input_folder) if f.endswith(".las")]
@@ -285,6 +298,10 @@ def execute_lastoraster(input_folder, output_folder, cellsize):
                 {
                     "type": "readers.las",
                     "filename": full_path_input_file
+                },
+                {
+                    "type": "filters.crop",
+                    "shape": os.path.join(footprint_folder, "footprint_"+file[:-4] +".shp")
                 },
                 {
                     "type": "filters.delaunay"  # Create a TIN from the LAS points

@@ -5,18 +5,11 @@
 # Concordia University
 # Geography, Planning and Environment Department
 # guenole.chone@concordia.ca
-# Fevrier 2019
 #####################################################
 
-# v1.1 - 10 mai 2018 - Correction des problèmes de zones dupliquées aux confluences (due aux segments d'un pixel de
-#   long). Correction des longueurs des segments aux confluences.
-# v1.2 - 28 février 2019 - Suppression des coupures aux confluences, ajout des coupures aux lacs.
-# v1.3 - septembre 2019 - Coupure nette des rasters aux lacs + ajout du critère de pente
-# v1.4 - octobre 2019 - Debug : problème de coupure des lacs avec multi fp, problème si zone de lac trop courte
-# v1.5 - fevrier 2020 - Debug : problème de clip pour les confluent des segments coupé par les lacs
-# v1.6 - mai 2020 - Coupure pour SUB et SUPER GC - Séparation interface et metier
 
 import arcpy
+import os
 from CreateZonesWlakesWSlope import *
 
 class CreateZonesWlakes(object):
@@ -75,10 +68,21 @@ class CreateZonesWlakes(object):
             parameterType="Required",
             direction="Input")
 
+        # restrict to filesystem workspaces
         param0.filter.list = ["File System"]
-        param0.value = arcpy.env.scratchWorkspace
-        param_frompoint.filter.list = ["Point"]
+
+        # Set sensible defaults using the project/workspace
+        project_root = arcpy.env.workspace
+
+        param_flowdir.value = os.path.join(project_root, "10mDEMs.gdb", "lidar10m_fd")
         param_lakes.filter.list = ["POLYGON"]
+        param_lakes.value = os.path.join(project_root, "Geometry.gdb", "lakesforsim")
+        param_frompoint.filter.list = ["Point"]
+        param_frompoint.value = os.path.join(project_root, "Geometry.gdb", "from_pts")
+
+        param_folder.value = os.path.join(project_root, "Tiles")
+        param0.value = os.path.join(project_root, "temp")
+
         param_distance.value = 15000
         param_bufferw.value = 3000
 
@@ -116,13 +120,7 @@ class CreateZonesWlakes(object):
         bufferw = int(parameters[4].valueAsText)
         str_folder = parameters[5].valueAsText
 
-        arcpy.env.scratchWorkspace = parameters[6].valueAsText
-
-        execute_CreateZone(r_flowdir, str_lakes, r_slope, minslope, str_frompoint, distance, bufferw, str_folder, messages)
+        with arcpy.EnvManager(scratchWorkspace=parameters[6].valueAsText):
+            execute_CreateZone(r_flowdir, str_lakes, r_slope, minslope, str_frompoint, distance, bufferw, str_folder, messages)
 
         return
-
-
-
-
-

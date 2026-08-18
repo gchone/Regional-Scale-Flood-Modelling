@@ -10,7 +10,7 @@
 
 import arcpy
 from WidthAssessment import *
-
+import os
 
 class LargeurParTransect(object):
     def __init__(self):
@@ -22,7 +22,7 @@ class LargeurParTransect(object):
         param_streamnetwork = arcpy.Parameter(
             displayName="Route layer (or lines)",
             name="streamnetwork",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_idfield = arcpy.Parameter(
@@ -34,13 +34,13 @@ class LargeurParTransect(object):
         param_riverbed = arcpy.Parameter(
             displayName="River polygons",
             name="riverbed",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_ineffarea = arcpy.Parameter(
             displayName="Polygons identifying dead water",
             name="ineffarea",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Optional",
             direction="Input")
         param_maxwidth = arcpy.Parameter(
@@ -68,12 +68,22 @@ class LargeurParTransect(object):
             parameterType="Required",
             direction="Output")
 
+        # Set default values similar to ExtractWaterSurface_Interface
+
+        project_path = arcpy.env.workspace
+        param_streamnetwork.value = os.path.join(project_path, "Geometry.gdb", "routes")
+        param_idfield.parameterDependencies = [param_streamnetwork.name]
+        param_idfield.value = "RID"
+        param_riverbed.value = os.path.join(project_path, "Geometry.gdb", "channelpoly")
+
+        param_maxwidth.value = 1000
+        param_spacing.value = 5
+        param_transects.value = os.path.join(project_path, "Width.gdb", "width_transects")
+        param_cspoints.value = os.path.join(project_path, "Width.gdb", "width_pts")
+
         param_streamnetwork.filter.list = ["Polyline"]
-        param_idfield.enabled = False
         param_riverbed.filter.list = ["Polygon"]
         param_ineffarea.filter.list = ["Polygon"]
-        param_maxwidth.value = 200
-        param_spacing.value = 8
 
         params = [param_streamnetwork, param_idfield, param_riverbed, param_ineffarea, param_maxwidth,
                   param_spacing, param_transects, param_cspoints]
@@ -84,15 +94,12 @@ class LargeurParTransect(object):
         return True
 
     def updateParameters(self, parameters):
-        if parameters[0].valueAsText:  # streamnetwork a été spécifié
-            parameters[1].enabled = True
-            parameters[1].filter.list = [f.name for f in arcpy.ListFields(parameters[0].valueAsText)]
-        else:
-            parameters[1].enabled = False
-
         return
 
     def updateMessages(self, parameters):
+        parameters[7].clearMessage()
+        if arcpy.Describe(arcpy.env.workspace) != 'FileGDB':
+            parameters[7].setErrorMessage('Tool needs a File Geodatabase as workspace to run properly.')
         return
 
     def execute(self, parameters, messages):

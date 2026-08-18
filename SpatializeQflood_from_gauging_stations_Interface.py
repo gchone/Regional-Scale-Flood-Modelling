@@ -20,13 +20,13 @@ class SpatializeQflood_gauging_stations(object):
         param_r_flowacc = arcpy.Parameter(
             displayName="Flow Accumulation raster",
             name="r_flowacc",
-            datatype="GPRasterLayer",
+            datatype="DERasterDataset",
             parameterType="Required",
             direction="Input")
         param_routes = arcpy.Parameter(
             displayName="Input D8 route feature class",
             name="routes",
-            datatype="GPFeatureLayer",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Input")
         param_RID_field = arcpy.Parameter(
@@ -71,16 +71,10 @@ class SpatializeQflood_gauging_stations(object):
             datatype="Field",
             parameterType="Required",
             direction="Input")
-        param_RID_Qpoints = arcpy.Parameter(
-            displayName="RID field in Qpoints",
-            name="RID_Qpoints",
-            datatype="Field",
-            parameterType="Required",
-            direction="Input")
-        param_dist_field_Qpoints = arcpy.Parameter(
-            displayName="MEAS field in Qpoints ",
-            name="dist_field_Qpoints",
-            datatype="Field",
+        param_Qdistance = arcpy.Parameter(
+            displayName="Maximum distance of gauging stations to the river (m)",
+            name="Qdistance",
+            datatype="GPDouble",
             parameterType="Required",
             direction="Input")
         param_Q_field_Qpoints = arcpy.Parameter(
@@ -98,24 +92,32 @@ class SpatializeQflood_gauging_stations(object):
         param_output_points = arcpy.Parameter(
             displayName="Points Output table",
             name="output_points",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
+        project_path = arcpy.env.workspace
 
+        param_r_flowacc.value = os.path.join(project_path, "10mDEMs.gdb", "lidar10m_facc")
+        param_routes.filter.list = ["Polyline"]
+        param_routes.value = os.path.join(project_path, "Geometry.gdb", "routesD8")
         param_RID_field.parameterDependencies = [param_routes.name]
+        param_RID_field.value = "RID"
+        param_links.value = os.path.join(project_path, "Geometry.gdb", "linksD8")
+        param_ptsonD8.value = os.path.join(project_path, "Geometry.gdb", "pathpointsD8")
+        param_Qpoints.value = os.path.join(project_path, "Gauging_stations.gdb", "QStationsFlood_D8")
         param_id_field_Qpoints.parameterDependencies = [param_Qpoints.name]
-        param_RID_Qpoints.parameterDependencies = [param_Qpoints.name]
+        param_id_field_Qpoints.value = "OBJECTID"
         param_name_Qpoints.parameterDependencies = [param_Qpoints.name]
         param_drainage_Qpoints.parameterDependencies = [param_Qpoints.name]
-        param_dist_field_Qpoints.parameterDependencies = [param_Qpoints.name]
         param_Q_field_Qpoints.parameterDependencies = [param_Qpoints.name]
-
-
+        param_Qdistance.value = 500.0
+        param_beta.value = 1.0
+        param_output_points.value = os.path.join(project_path, "Discharge.gdb", "Qflood_D8")
 
         params = [param_r_flowacc, param_routes, param_RID_field, param_links, param_ptsonD8, param_Qpoints,
-                  param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_RID_Qpoints,
-                  param_dist_field_Qpoints, param_Q_field_Qpoints, param_beta, param_output_points]
+                  param_id_field_Qpoints, param_name_Qpoints, param_drainage_Qpoints, param_Q_field_Qpoints, param_Qdistance,
+                  param_beta, param_output_points]
 
         return params
 
@@ -139,14 +141,14 @@ class SpatializeQflood_gauging_stations(object):
         id_field_Qpoints = parameters[6].valueAsText
         name_Qpoints = parameters[7].valueAsText
         drainage_Qpoints = parameters[8].valueAsText
-        RID_Qpoints= parameters[9].valueAsText
-        dist_field_Qpoints = parameters[10].valueAsText
-        Q_field_Qpoints = parameters[11].valueAsText
-        beta_coef = float(parameters[12].valueAsText)
-        output_points = parameters[13].valueAsText
+        Q_field_Qpoints = parameters[9].valueAsText
+        max_dist = float(parameters[10].valueAsText)
+        beta_coef = float(parameters[11].valueAsText)
+        output_points = parameters[12].valueAsText
 
         execute_SpatializeQ_from_gauging_stations(routes, links, RID_field, D8pathpoints, r_flowacc, Qpoints,
-                                                  id_field_Qpoints, name_Qpoints, drainage_Qpoints, RID_Qpoints, dist_field_Qpoints, Q_field_Qpoints, None, None,
-                                                  None, beta_coef, output_points, messages)
+                                                  id_field_Qpoints, name_Qpoints, drainage_Qpoints,
+                                                  Q_field_Qpoints, max_dist, None, None, None,
+                                                  beta_coef, None, output_points, messages)
 
         return

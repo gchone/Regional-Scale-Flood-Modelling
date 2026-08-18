@@ -18,7 +18,7 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
     :param route_shapefile: Output shapefile
     :param routelinks_table: Output table providing the links between reaches
     :param routeID_field: Name of the reach ID field
-    :param str_output_points: Output table of the Flow direction pixels along the flow path
+    :param str_output_points: Output points of the Flow direction pixels along the flow path
     :param messages: ArcGIS Message object
     :return: None
     """
@@ -263,10 +263,6 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
                     if split[0] in original_fp_OID:
                         original_fp_OID[segmentid] = original_fp_OID.pop(split[0])
 
-        # Saving the points
-        if arcpy.Exists(str_output_points) and arcpy.env.overwriteOutput == True:
-            arcpy.Delete_management(str_output_points)
-        arcpy.da.NumPyArrayToTable(pointsarray, str_output_points)
 
         if not loop_error:
             # Saving the links
@@ -274,10 +270,9 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
                 arcpy.Delete_management(routelinks_table)
             arcpy.da.NumPyArrayToTable(links, routelinks_table)
 
-
             # Creating lines
             arcpy.CreateFeatureclass_management("in_memory", "LINES", "POLYLINE", spatial_reference=str_frompoints)
-            lines = "in_memory\LINES"
+            lines = r"in_memory\LINES"
             arcpy.AddField_management(lines, routeID_field, "LONG")
             arcpy.AddField_management(lines, "ORIG_FID", "LONG")
             linecursor = arcpy.da.InsertCursor(lines, ["SHAPE@", routeID_field, "ORIG_FID"])
@@ -297,7 +292,6 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
                 else:
                     linecursor.insertRow([line, reachid, -999])
 
-
             # Create routes from start point to end point
             arcpy.AddField_management(lines, routeID_field, "LONG")
             arcpy.AddField_management(lines, "FromF", "FLOAT")
@@ -310,6 +304,15 @@ def execute_TreeFromFlowDir(r_flowdir, str_frompoints, route_shapefile, routelin
                                      from_measure_field="FromF",
                                      to_measure_field=Lengthfield)
             arcpy.JoinField_management(route_shapefile, routeID_field, lines, routeID_field, "ORIG_FID")
+
+            # Saving the points
+            if arcpy.Exists(str_output_points) and arcpy.env.overwriteOutput == True:
+                arcpy.Delete_management(str_output_points)
+            temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
+            arcpy.da.NumPyArrayToTable(pointsarray, temp_outtable)
+            arcpy.MakeRouteEventLayer_lr(route_shapefile, routeID_field, temp_outtable, "RID POINT dist",
+                                         "D8pts_lyr")
+            arcpy.CopyFeatures_management("D8pts_lyr", str_output_points)
 
     finally:
         gc.CleanAllTempFiles()
@@ -326,8 +329,6 @@ def execute_CreateTreeFromShapefile(rivernet, route_shapefile, routelinks_table,
     :param channeltype_field: Field identifying the main channel (value = 1) or a secondary channel (value = 0)
     :return: None
     """
-
-
 
     def __recursivebuildtree(downstream_junction, np_junctions, routeID_field, list_down_up_links, channeltype_field, reaches_done):
 
@@ -368,6 +369,14 @@ def execute_CreateTreeFromShapefile(rivernet, route_shapefile, routelinks_table,
 
     try:
 
+        # First, check that the input data is properly dissolved
+        nb_lines = int(arcpy.GetCount_management(rivernet)[0])
+        dissolved = gc.CreateScratchName("net", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
+        arcpy.management.Dissolve(rivernet, dissolved, multi_part="SINGLE_PART")
+        nb_lines_d = int(arcpy.GetCount_management(dissolved)[0])
+        gc.CleanTempFile(dissolved)
+        if nb_lines != nb_lines_d:
+            messages.addWarningMessage("WARNING: The input river network is not properly dissolved.")
 
 
         # Create Junction points: two points created by reach, at both end of the line
@@ -388,7 +397,7 @@ def execute_CreateTreeFromShapefile(rivernet, route_shapefile, routelinks_table,
         junctionid_name = arcpy.Describe(junctions).OIDFieldName
 
         # Add a id ("FEAT_SEQ") to the junction grouping junctions at the same place (same place = same id))
-        junctions_table = gc.CreateScratchName("table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
+        junctions_table = gc.CreateScratchName("table", data_type="ArcInfoTable", workspace="in_memory")
         arcpy.FindIdentical_management(junctions, junctions_table, ["Shape"])
         arcpy.JoinField_management(junctions, junctionid_name, junctions_table, "IN_FID")
         # Add also the rivernet data into the junctions files (make the query to treat the main channel in priority easier after)
@@ -473,7 +482,8 @@ def execute_CreateTreeFromShapefile(rivernet, route_shapefile, routelinks_table,
                                  to_measure_field=Lengthfield)
         if channeltype_field is not None:
             arcpy.JoinField_management(route_shapefile, routeID_field, rivernet, routeID_field, channeltype_field)
-
+    except Exception as e:
+        messages.addErrorMessage(repr(e))
     finally:
         gc.CleanAllTempFiles()
 
@@ -569,7 +579,7 @@ def createFullTreeTableFromShapefile(route_shapefile, routeID_field, IDlink1name
         junctionid_name = arcpy.Describe(junctions).OIDFieldName
 
         # Add a id ("FEAT_SEQ") to the junction grouping junctions at the same place (same place = same id))
-        junctions_table = gc.CreateScratchName("table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
+        junctions_table = gc.CreateScratchName("table", data_type="ArcInfoTable", workspace="in_memory")
         arcpy.FindIdentical_management(junctions, junctions_table, ["Shape"])
         arcpy.JoinField_management(junctions, junctionid_name, junctions_table, "IN_FID")
         # Add also the rivernet data into the junctions files (make the query to treat the main channel in priority easier after)

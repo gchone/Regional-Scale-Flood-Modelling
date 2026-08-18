@@ -9,6 +9,7 @@
 
 
 from BedAssessmentDirectLinearNet import *
+import os
 
 class BedAssessment(object):
     def __init__(self):
@@ -17,7 +18,6 @@ class BedAssessment(object):
         self.canRunInBackground = True
 
     def getParameterInfo(self):
-
         param_route = arcpy.Parameter(
             displayName="Route layer",
             name="route",
@@ -105,21 +105,36 @@ class BedAssessment(object):
         param_output_pts = arcpy.Parameter(
             displayName="Output table",
             name="output_pts",
-            datatype="GPTableView",
+            datatype="DEFeatureClass",
             parameterType="Required",
             direction="Output")
 
+        # Set default values similar to ExtractWaterSurface_Interface
+        project_path = arcpy.env.workspace
+        param_route.value = os.path.join(project_path, "Geometry.gdb", "routes_main")
         param_route_RID_field.parameterDependencies = [param_route.name]
+        param_route_RID_field.value = "RID"
         param_route_order_field.parameterDependencies = [param_route.name]
+        param_route_order_field.value = "Qorder"
+        param_routelinks.value = os.path.join(project_path, "Geometry.gdb", "routes_main_links")
+        param_points.value = os.path.join(project_path, "Bathy.gdb", "bathy_input_pts")
         param_points_IDfield.parameterDependencies = [param_points.name]
+        param_points_IDfield.value = "ObjectID_1"
         param_points_RIDfield.parameterDependencies = [param_points.name]
+        param_points_RIDfield.value = "RID"
         param_points_distfield.parameterDependencies = [param_points.name]
+        param_points_distfield.value = "MEAS"
         param_points_Qfield.parameterDependencies = [param_points.name]
+        param_points_Qfield.value = "computedQLiDAR"
         param_points_Wfield.parameterDependencies = [param_points.name]
+        param_points_Wfield.value = "Width_m"
         param_points_WSfield.parameterDependencies = [param_points.name]
+        param_points_WSfield.value = "zws_smoothed"
         param_points_DEMfield.parameterDependencies = [param_points.name]
+        param_points_DEMfield.value = "ID_DEM"
         param_manning.value = 0.03
         param_min_slope.value = 0.00001
+        param_output_pts.value = os.path.join(project_path, "Bathy.gdb", "bathy_pts")
 
         params = [param_route, param_route_RID_field, param_route_order_field, param_routelinks, param_points, param_points_IDfield, param_points_RIDfield, param_points_distfield, param_points_Qfield, param_points_Wfield, param_points_WSfield, param_points_DEMfield, param_manning, param_min_slope, param_output_pts]
 
@@ -151,6 +166,8 @@ class BedAssessment(object):
         min_slope = float(parameters[13].valueAsText)
         output_pts = parameters[14].valueAsText
 
-        execute_BedAssessment(route, route_RID_field, route_order_field, routelinks, points, points_IDfield, points_RIDfield, points_distfield, points_Qfield, points_Wfield, points_WSfield, points_DEMfield, manning, min_slope, output_pts, messages)
+        execute_BedAssessment(route, route_RID_field, route_order_field, routelinks, points, points_IDfield,
+                              points_RIDfield, points_distfield, points_Qfield, points_Wfield, points_WSfield,
+                              points_DEMfield, manning, min_slope, output_pts, messages)
 
         return
