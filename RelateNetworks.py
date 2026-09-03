@@ -1,80 +1,167 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
 
-# Author: Mariana
-"""This tool creates a 'near table' to relate river routes('A') and D8/D4 routes ('B').
-When it runs once, some links are omitted and others in_features are linked to two different reaches from the near_feature layer.
-This issue is related to the way ArcGis calculates distance in proximity tools such as "Near Table"
-- Multiple features may be equally closest to another feature. When this occurs, one of the equally closest features is randomly selected as the closest.
-- The distance between two features is zero whenever there is at least one x,y coordinate that is shared between them.
-- This means that when two features intersect, overlap, cross, or touch, the distance between them is zero.
-For fixing this issue, the tool has to run twice (A to B and B to A). Then 2 clean-ups are required:
-1. Clean up of duplicate combinations
-2. Clean up wrong combination based on the number of intersections (points) between the two layers"""
-
-# 1. Running Generate Near Table in both directions
-import os.path
-import numpy as np
-import arcpy
-import ArcpyGarbageCollector as gc
+import RiverNetworkTools
 
 
-def execute_RelateNetworks(shapefile_A, RID_A, shapefile_B, RID_B, out_table, messages):
+def relate_networks(
+    shapefile_a,
+    rid_a,
+    shapefile_b,
+    rid_b,
+    feedback=None,
+    strict_count=True,
+    GIStools=None,
+    messages=None,
+):
+    if GIStools is None:
+        GIStools = _autodetect_gistools()
+
+    effective_feedback = feedback if feedback is not None else _MessagesFeedback(messages)
+    features_a = list(GIStools.DataManagement.load_line_features(shapefile_a, [rid_a]))
+    features_b = list(GIStools.DataManagement.load_line_features(shapefile_b, [rid_b]))
+    output_rid_a, output_rid_b, rename_notes = _resolve_output_field_names(rid_a, rid_b)
+    for note in rename_notes:
+        _warn_feedback(messages, effective_feedback, note)
+    internal_rid_b = rid_b
+    if str(rid_a).lower() == str(rid_b).lower():
+        internal_rid_b = output_rid_b
+        features_b = [
+            RiverNetworkTools.LineFeature(
+                dict(feature.attributes, **{internal_rid_b: feature.attributes[rid_b]}),
+                list(feature.vertices),
+            )
+            for feature in features_b
+        ]
+    tuple_rows = []
+    for row in RiverNetworkTools.relate_networks(
+        features_a,
+        rid_a,
+        features_b,
+        internal_rid_b,
+        strict_count=strict_count,
+        feedback=effective_feedback,
+    ):
+        tuple_rows.append((row[rid_a], row[internal_rid_b], row['PART_COUNT']))
+    return tuple_rows
 
 
-    resultA = arcpy.GetCount_management(shapefile_A)
-    resultB = arcpy.GetCount_management(shapefile_B)
-    countA = int(resultA.getOutput(0))
-    countB = int(resultB.getOutput(0))
+def execute_RelateNetworks(
+    shapefile_A,
+    RID_A,
+    shapefile_B,
+    RID_B,
+    out_table,
+    messages=None,
+    GIStools=None,
+    strict_count=True,
+):
+    if GIStools is None:
+        GIStools = _autodetect_gistools()
+
+    try:
+        output_rid_a, output_rid_b, rename_notes = _resolve_output_field_names(RID_A, RID_B)
+        for note in rename_notes:
+            _add_warning(messages, note)
+        tuple_rows = relate_networks(
+            shapefile_A,
+            RID_A,
+            shapefile_B,
+            RID_B,
+            strict_count=strict_count,
+            GIStools=GIStools,
+            messages=messages,
+        )
+        output_rows = [
+            {output_rid_a: row[0], output_rid_b: row[1], 'PART_COUNT': row[2]}
+            for row in tuple_rows
+        ]
+        info_a = GIStools.DataManagement.read_table_dataset(shapefile_A, [RID_A])
+        info_b = GIStools.DataManagement.read_table_dataset(shapefile_B, [RID_B])
+        return GIStools.DataManagement.write_output_table(
+            out_table,
+            output_rows,
+            _empty_input_info(),
+            [
+                {
+                    'name': output_rid_a,
+                    'field_definition': info_a['field_definitions'].get(RID_A),
+                    'dtype': 'int',
+                },
+                {
+                    'name': output_rid_b,
+                    'field_definition': info_b['field_definitions'].get(RID_B),
+                    'dtype': 'int',
+                },
+                {'name': 'PART_COUNT', 'dtype': 'int'},
+            ],
+        )
+    except Exception as exc:
+        if messages is None:
+            raise
+        _add_error(messages, str(exc))
 
 
-    if countA != countB:
-        arcpy.AddError("The feature classes have different number of rows. This tool runs when row value is equal")
+class _MessagesFeedback:
+    def __init__(self, messages):
+        self.messages = messages
 
-    else:
+    def pushInfo(self, message):
+        _add_message(self.messages, message)
 
-        # Intersection between the two line shapefiles and counting the points of the intersection.
-        to_intersect = [shapefile_A, shapefile_B]
-        temp_intersect = gc.CreateScratchName("temp", data_type="FeatureClass", workspace="in_memory")
-        arcpy.Intersect_analysis(to_intersect, temp_intersect, "ALL", "", "POINT")
-        # "PART_COUNT" provides de amount of points in each intersection between the two line shapefiles. Analyzing this
-        # value allows to choose the correct combination in the near_table (temp_merged). If we have a combination like
-        # 5-8 with a part_count=1 (being the 5 the # routeID and 8 the RID) and 5-10 with a part_count = 256, the last
-        # combination is the correct one.
-        arcpy.AddGeometryAttributes_management(temp_intersect, "PART_COUNT")
-        B_fields = [f.name for f in arcpy.Describe(shapefile_B).fields]
-        RID_B_index = B_fields.index(RID_B)
-        inter_RID_B_index = len(arcpy.Describe(shapefile_A).fields)+RID_B_index
-        inter_fields = [f.name for f in arcpy.Describe(temp_intersect).fields]
-        inter_RID_B = inter_fields[inter_RID_B_index]
-        numpyrelatetable = arcpy.da.FeatureClassToNumPyArray(temp_intersect, [RID_A, inter_RID_B, "PART_COUNT"])
+    def pushWarning(self, message):
+        _add_warning(self.messages, message)
 
-        # Combinations of RID with the highest PART_COUNT should be kept.
-        uniques_RIDs = np.unique(numpyrelatetable[[RID_A]])
-        filtered_RIDA = None
-        for i in uniques_RIDs:
-            tmp = numpyrelatetable[np.where(numpyrelatetable[[RID_A]] == i)]
-            tmp_max = np.max(tmp["PART_COUNT"])
-            tmp_res = tmp[tmp["PART_COUNT"] == tmp_max]
-            if filtered_RIDA is None:
-                filtered_RIDA = np.copy(tmp_res)
-            else:
-                filtered_RIDA = np.concatenate((filtered_RIDA, tmp_res))
+    def isCanceled(self):
+        return False
 
-        uniques_RIDs = np.unique(filtered_RIDA[[RID_B]])
-        filtered_RIDB = None
-        for i in uniques_RIDs:
-            tmp = filtered_RIDA[np.where(filtered_RIDA[[RID_B]] == i)]
-            tmp_max = np.max(tmp["PART_COUNT"])
-            tmp_res = tmp[tmp["PART_COUNT"] == tmp_max]
-            if filtered_RIDB is None:
-                filtered_RIDB = np.copy(tmp_res)
-            else:
-                filtered_RIDB = np.concatenate((filtered_RIDB, tmp_res))
+    def setProgress(self, progress):
+        return
 
-        arcpy.da.NumPyArrayToTable(filtered_RIDB, out_table)
 
-        #Check if the matches are always one-to-one
-        uniques_RID1 = np.unique(filtered_RIDB[[RID_A]])
-        uniques_RID2 = np.unique(filtered_RIDB[[RID_B]])
-        if len(uniques_RID1)!=filtered_RIDB.shape[0] or len(uniques_RID2)!=filtered_RIDB.shape[0]:
-            messages.addWarningMessage("Incorrect network match")
+def _resolve_output_field_names(rid_a, rid_b):
+    if str(rid_a).lower() != str(rid_b).lower():
+        return rid_a, rid_b, []
+    renamed = f'{rid_b}_1'
+    return rid_a, renamed, [f"Output field '{rid_b}' renamed to '{renamed}' to avoid collision."]
+
+
+def _empty_input_info():
+    return {'records': [], 'field_names': [], 'field_definitions': {}}
+
+
+def _autodetect_gistools():
+    try:
+        import ArcGIStools
+        return ArcGIStools
+    except Exception:
+        pass
+    try:
+        import QGIStools
+        return QGIStools
+    except Exception:
+        pass
+    raise ValueError('A GIStools package must be provided.')
+
+
+def _add_message(messages, message):
+    if messages is not None:
+        messages.add_message(message)
+
+
+def _add_warning(messages, message):
+    if messages is not None:
+        messages.add_warning(message)
+
+
+def _warn_feedback(messages, feedback, message):
+    if messages is not None:
+        messages.add_warning(message)
+        return
+    if feedback is not None and hasattr(feedback, 'pushWarning'):
+        feedback.pushWarning(message)
+
+
+def _add_error(messages, message):
+    if messages is not None:
+        messages.add_error(message)
+    raise RuntimeError(message)

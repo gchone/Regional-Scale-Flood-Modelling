@@ -1,0 +1,18 @@
+# Created by Guénolé, after Claude merged the ArcGIS and QGIS tools
+
+I deleted the folder "Regional-Scale-Flood-Modelling-ArcGIS" after the merging of the ArcGIS and QGIS tools by Claude
+However, there were files still used by the scripts within this folder. I moved them where they should be. However, if there are still in use and where not merged, it means that some ArcGIS only tools are remaining and/or the merging was not done correctly. This should be investigated.
+
+Regional-Scale-Flood-Modelling-ArcGIS/ArcpyGarbageCollector.py -> ArcGIStools/ArcpyGarbageCollector.py
+	# That seems coherent, as this is a arcgis-only utility tool
+
+Regional-Scale-Flood-Modelling-ArcGIS/DataManagementDEH.py -> ArcGIStools/DataManagementDEH.py
+	# I haven't check how the creation of the width tools were done by Claude. An equivalent should appear in the QGIS folder. I suspect the merging was not optimally done. To investigate.
+
+Regional-Scale-Flood-Modelling-ArcGIS/RasterIO.py ->ArcGIStools/RasterIO.py
+	# I'm not sure it's relevant to have the RasterIO utility anymore. What is it use for? Shouldn't it stay in the "River tools" instead? It's quite an old and deprecated thing, I'm pretty sure a better alternative must exist (whitebox maybe?). To investigate.
+
+
+DownstreamSlope.py and DownstreamSlope_Interface.py, as well as SpatializeQ_rasters.py and SpatializeQ_rasters_Interface.py  were purposely removed (were in the detailed toolbox). 
+
+Similarly, it's possible that required files still existed in the "Regional-Scale-Flood-Modelling-OpenGIS-2026" folder, that I removed. If so, why there were still there should be investigated.  

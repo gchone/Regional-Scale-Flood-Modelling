@@ -1,21 +1,28 @@
 # -*- coding: utf-8 -*-
 
+from pathlib import Path
+import sys
+
 import arcpy
 
-from RelateNetworks_Interface import *
-from LocatePointsAlongRoutes_Interface import *
-from CreateTreeFromShapefile_Interface import *
-from WSsmoothing_Interface import *
-from LocateMostDownstreamPoints_Interface import *
-from InterpolatePoints_Interface import *
-from DownstreamSlope_Interface import *
-from TopologicalD8RelateNetworks_Interface import *
-from D8toD4_Interface import *
-from SpatializeQ_rasters_Interface import *
-from OrderReaches_Interface import *
-from FlowDirNetwork_Interface import *
-from ExtractDischarges_Interface import *
-from SpatializeQ_Interface import *
+_ROOT = Path(__file__).resolve().parent
+sys.path.append(str(_ROOT))
+sys.path.append(str(_ROOT / "Regional-Scale-Flood-Modelling-ArcGIS"))
+
+from ArcGIS_RelateNetworks_Interface import *
+from ArcGIS_LocatePointsAlongRoutes_Interface import *
+from ArcGIS_CreateNetworkFromFC_Interface import *
+from ArcGIS_WSsmoothing_Interface import *
+from ArcGIS_LocateMostDownstreamPoints_Interface import *
+from ArcGIS_InterpolatePoints_Interface import *
+from ArcGIS_TopologicalRelateNetworks_Interface import *
+from ArcGIS_D4FlowDirection_Interface import *
+from ArcGIS_OrderReaches_Interface import *
+from ArcGIS_FlowDirectionNetwork_Interface import *
+from ArcGIS_ExtractDischarges_Interface import *
+from ArcGIS_SpatializeQ_Interface import *
+from ArcGIS_SpatializeQLIDARFromGaugingStations_Interface import *
+from ArcGIS_SpatializeQFloodFromGaugingStations_Interface import *
 
 class Toolbox(object):
     def __init__(self):
@@ -23,5 +30,4 @@ class Toolbox(object):
         self.label = "Large Scale Flood Modeling Toolbox - detailed processing"
         self.alias = ""
 
-        self.tools = [SpatializeQ_rasters, D8toD4, TopologicalRelateNetworks, DownstreamSlope, InterpolatePoints, RelateNetworks, LocatePointsAlongRoutes, CreateTreeFromShapefile,  LocateMostDownstreamPoints, WSsmoothing, OrderReaches, FlowDirNetwork, ExtractDischarges, SpatializeQ]
-
+        self.tools = [ArcGIS_D4FlowDirection_Interface, TopologicalRelateNetworks, ArcGIS_InterpolatePoints_Interface, RelateNetworks, ArcGIS_LocatePointsAlongRoutes_Interface, CreateNetworkFromFC, LocateMostDownstreamPoints, ArcGIS_WSsmoothing_Interface, OrderReaches, FlowDirectionNetwork, ArcGIS_ExtractDischarges_Interface, SpatializeQ, SpatializeQLIDARFromGaugingStations, SpatializeQFloodFromGaugingStations]
