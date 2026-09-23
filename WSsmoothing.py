@@ -323,7 +323,7 @@ def ws_processing(
     slope_sigma=300.0,
     slope_factor=2.0,
     feedback=None,
-    rdp_epsilon=0.02,
+    rdp_epsilon=0.025,
 ):
     del upstream
     network = RiverNetworkTools.RiverNetwork()
