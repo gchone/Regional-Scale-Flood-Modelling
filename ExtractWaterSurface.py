@@ -123,12 +123,48 @@ def execute_ExtractWaterSurface(
                 ),
             )
 
+        # Filter points by DEM footprint: keep only points that fall within DEM polygons
+        _add_message(messages, "Filtering D8 path points by DEM footprints...")
+        sampled_pathpoints_temp = _build_temp_vector_path(ouput_table, "extractws_pathpoints_temp", GIStools)
+        temporary_datasets.append(sampled_pathpoints_temp)
+        GIStools.DataManagement.write_bed_assessment_points(
+            sampled_pathpoints_temp,
+            sampled_pathpoints_info["records"],
+            sampled_pathpoints_info,
+            [
+                {"name": ws_field_name, "dtype": "float"},
+                {"name": pts_bathy_RID_field, "dtype": _infer_simple_dtype(d8_to_main.values(), default="int")},
+            ],
+            spatial_reference=sampled_pathpoints_info.get("spatial_reference"),
+        )
+        
+        # Perform spatial join with DEM footprints to filter out points outside footprints
+        sampled_with_dem_info = GIStools.Geoprocessing.join_polygon_field_to_points_records(
+            _open_vector_dataset(GIStools, sampled_pathpoints_temp),
+            dems_footprints_dataset,
+            DEMs_field,
+            field_names=list(sampled_pathpoints_info.get("field_names", [])),
+        )
+        
+        # Count how many points were filtered out
+        points_outside_dem_count = len(sampled_pathpoints_info["records"]) - len(sampled_with_dem_info["records"])
+        if points_outside_dem_count > 0:
+            _add_warning(
+                messages,
+                "{} sampled D8 path point(s) fell outside DEM footprints and were excluded.".format(
+                    points_outside_dem_count
+                ),
+            )
+        
+        # Update sampled_pathpoints_info to use only filtered records
+        sampled_pathpoints_info = sampled_with_dem_info
+
         sampled_pathpoints = _build_temp_vector_path(ouput_table, "extractws_pathpoints", GIStools)
         temporary_datasets.append(sampled_pathpoints)
         GIStools.DataManagement.write_bed_assessment_points(
             sampled_pathpoints,
             sampled_pathpoints_info["records"],
-            pathpoint_info,
+            sampled_pathpoints_info,
             [
                 {"name": ws_field_name, "dtype": "float"},
                 {"name": pts_bathy_RID_field, "dtype": _infer_simple_dtype(d8_to_main.values(), default="int")},
