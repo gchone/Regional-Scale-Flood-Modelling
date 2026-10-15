@@ -111,29 +111,70 @@ def execute_ExtractWaterSurface(routes, links, RID_field, order_field, routes_3m
         tmp_pts_table = gc.CreateScratchName("pts_table", data_type="ArcInfoTable", workspace=arcpy.env.scratchWorkspace)
         arcpy.management.Copy(pts_table, tmp_pts_table)
         arcpy.MakeXYEventLayer_management (tmp_pts_table, X_field_pts, Y_field_pts, "pts_layer", routes_3m)
-        arcpy.sa.ExtractMultiValuesToPoints("pts_layer", [lidar3m_cor])
 
-        arcpy.AddJoin_management("pts_layer", RID_field_3m, relatetable, RID_field_3m)
+        pts_layer_withDEM = gc.CreateScratchName("pts_table", data_type="FeatureClass", workspace="in_memory")
+        arcpy.SpatialJoin_analysis("pts_layer", DEMs_footprints, pts_layer_withDEM) # Add the ID_DEM to the D8 data points
 
-        pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
+        arcpy.sa.ExtractMultiValuesToPoints(pts_layer_withDEM, [lidar3m_cor]) # Extract elevation value for the D8 data points
+
+        arcpy.MakeFeatureLayer_management(pts_layer_withDEM, "pts_lyr")
+        dem_not_null_where = arcpy.AddFieldDelimiters(pts_layer_withDEM, DEMs_field) + " IS NOT NULL"
+        arcpy.SelectLayerByAttribute_management("pts_lyr", "NEW_SELECTION", dem_not_null_where) # Exclude points outside DEM footprints
+        arcpy.AddJoin_management("pts_lyr", RID_field_3m, relatetable, RID_field_3m) # Add the RID from the main network to the D8 data points
+
+        pts_target_withDEM = gc.CreateScratchName("pts_table", data_type="FeatureClass", workspace="in_memory")
+        arcpy.SpatialJoin_analysis(pts_bathy, DEMs_footprints, pts_target_withDEM) # Add the ID_DEM to the target points
+        arcpy.MakeFeatureLayer_management(pts_target_withDEM, "pts_target_lyr")
+        arcpy.SelectLayerByAttribute_management("pts_target_lyr", "NEW_SELECTION", dem_not_null_where) # Exclude points outside DEM footprints
+
+        # Save the filtered target points to scratch workspace as a feature class with only required fields
+        pts_target_filtered = gc.CreateScratchName("pts_target_filtered", data_type="FeatureClass", workspace=arcpy.env.scratchWorkspace)
+        arcpy.CopyFeatures_management("pts_target_lyr", pts_target_filtered)
+        
+        # Delete unnecessary fields, keeping only required ones
+        all_fields = [f.name for f in arcpy.ListFields(pts_target_filtered) if f.type != 'OID' and f.name != 'SHAPE']
+        required_fields = [pts_bathy_RID_field, pts_bathy_ID_field, DEMs_field, pts_bathy_dist_field]
+        fields_to_delete = [f for f in all_fields if f not in required_fields]
+        
+        for field in fields_to_delete:
+            try:
+                arcpy.DeleteField_management(pts_target_filtered, field)
+            except:
+                pass
+
+        pts_bathy_RID_field_tmp = pts_bathy_RID_field
+        # Ensure RID_field_in_relatetable and pts_bathy_RID_field are not the same
+        if RID_field_in_relatetable == pts_bathy_RID_field:
+            new_rid_field = "RID_target"
+            arcpy.AlterField_management(pts_target_filtered, pts_bathy_RID_field, new_rid_field)
+            pts_bathy_RID_field_tmp = new_rid_field
 
         lidar3m_forws_basename = str(arcpy.Describe(lidar3m_cor).basename)
+        pts_lyr_basename = str(arcpy.Describe("pts_lyr").basename)
 
-        execute_AssignPointToClosestPointOnRoute("pts_layer", [lidar3m_forws_basename],
-                                                 routes, RID_field, pts_bathy, pts_bathy_RID_field, pts_bathy_dist_field,
-                                                 [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable],
-                                                 [pts_bathy_RID_field], pts_bathy_withws, "2-WAY CLOSEST")
+        # Assign data points to the closest point on the main network (with the same RID and same ID_DEM)
+         #pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace="in_memory")
+        pts_bathy_withws = gc.CreateScratchName("pts_withws", data_type="ArcInfoTable", workspace=r"in_memory")
+
+        execute_AssignPointToClosestPointOnRoute("pts_lyr", [lidar3m_forws_basename],
+                                                 routes, RID_field, pts_target_filtered, pts_bathy_RID_field_tmp, pts_bathy_dist_field,
+                                                 [arcpy.Describe(relatetable).basename + "." + RID_field_in_relatetable, pts_lyr_basename + "." + DEMs_field],
+                                                 [pts_bathy_RID_field_tmp, DEMs_field], pts_bathy_withws, "2-WAY CLOSEST")
+        # Interpolate water elevation values for target points where no data points are available
         pts_interpolated = gc.CreateScratchName("pts_interp", data_type="ArcInfoTable", workspace="in_memory")
-        execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
+        execute_InterpolatePoints(pts_bathy_withws, pts_bathy_ID_field, pts_bathy_RID_field_tmp, pts_bathy_dist_field, [lidar3m_forws_basename], pts_bathy, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, routes, links, RID_field, order_field, pts_interpolated)
 
         arcpy.MakeRouteEventLayer_lr(routes, RID_field, pts_interpolated, pts_bathy_RID_field + " POINT "+pts_bathy_dist_field, "interpolated_lyr")
 
+        # Add the ID_DEM to the interpolated points
         interpolated_withDEM = gc.CreateScratchName("interpDEM", data_type="FeatureClass", workspace="in_memory")
         arcpy.SpatialJoin_analysis("interpolated_lyr", DEMs_footprints, interpolated_withDEM)
 
+        # Compute water surface for the target points (quantile carving and smoothing)
         temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
         execute_WSprocessing(routes, links, RID_field, order_field, interpolated_withDEM, pts_bathy_ID_field, pts_bathy_RID_field, pts_bathy_dist_field, lidar3m_forws_basename, DEMs_field, temp_outtable, messages)
 
+        # Save
         arcpy.MakeRouteEventLayer_lr(routes, RID_field, temp_outtable, pts_bathy_RID_field + " POINT " + pts_bathy_dist_field, "D8pts_lyr")
         arcpy.CopyFeatures_management("D8pts_lyr", ouput_table)
     finally:

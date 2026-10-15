@@ -35,9 +35,10 @@ def execute_InterpolatePoints(points_table, id_field_pts, RID_field_pts, Distanc
 
     temp_outtable = gc.CreateScratchName("outtable", data_type="ArcInfoTable", workspace="in_memory")
     arcpy.da.NumPyArrayToTable(newarray, temp_outtable)
+    finalres_lyr = gc.CreateScratchName("finalres_lyr", data_type="FeatureClass", workspace="in_memory")
     arcpy.MakeRouteEventLayer_lr(network_shp, network_RID_field, temp_outtable,
-                                 RID_field_target + " POINT " + Distance_field_target, "finalres_lyr")
-    arcpy.CopyFeatures_management("finalres_lyr", ouput_pts)
+                                 RID_field_target + " POINT " + Distance_field_target, finalres_lyr)
+    arcpy.CopyFeatures_management(finalres_lyr, ouput_pts)
 
 
 def InterpolatePoints_with_objects(network, datacollection, data_fields, targetcollection, extrapolation_value, subdatasample = None):

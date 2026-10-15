@@ -27,8 +27,16 @@ def execute_AssignPointToClosestPointOnRoute(points, list_fields_to_keep, routes
 
     arcpy.MakeFeatureLayer_management(points, "points_lyr")
     # Layer for the points on route: made by Make Route Event Layer to use the linear referencing
-    arcpy.MakeRouteEventLayer_lr(routes, routes_IDfield, points_onroute,
-                                 points_onroute_RIDfield+" POINT "+points_onroute_distfield, "onroute_lyr")
+    
+    # Check if points_onroute is already a feature layer; if so, just reference it
+    desc_onroute = arcpy.Describe(points_onroute)
+    if desc_onroute.dataType != 'FeatureClass':
+        # Already a layer, just make a feature layer reference
+        arcpy.MakeFeatureLayer_management(points_onroute, "onroute_lyr")
+    else:
+        # It's a feature class, create a route event layer
+        arcpy.MakeRouteEventLayer_lr(routes, routes_IDfield, points_onroute,
+                                     points_onroute_RIDfield+" POINT "+points_onroute_distfield, "onroute_lyr")
 
     # We need to create a list of the different things to match
     cursor = arcpy.da.SearchCursor("points_lyr", matching_fields_pts)
