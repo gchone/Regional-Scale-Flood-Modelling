@@ -10,6 +10,7 @@
 
 
 import os
+import uuid
 
 from RasterIO import *
 
@@ -19,7 +20,8 @@ class pointflowpath:
 
 
 def execute_DefBCI(r_flowdir, r_flowacc, percent, str_zonesfolder,
-                   r_dem, r_width, r_zbed, r_manning, r_mask, str_outputfolder, messages):
+                   r_dem, r_width, r_zbed, r_manning, r_mask, str_outputfolder, messages,
+                   river_network):
 
     if not os.path.isdir(str_outputfolder):
         os.makedirs(str_outputfolder)
@@ -243,7 +245,7 @@ def execute_DefBCI(r_flowdir, r_flowacc, percent, str_zonesfolder,
 
 
 
-    # Création des fichiers .bci à partir des information du fichier inbci.shp
+    # Création des fichiers .bci à partir des informations du fichier inbci.shp
 
     bcipointcursor = arcpy.da.SearchCursor(save_inbci, ["SHAPE@", "zoneid", "flowacc", "type"])
     dictsegmentsin = {}
@@ -324,4 +326,91 @@ def execute_DefBCI(r_flowdir, r_flowacc, percent, str_zonesfolder,
                                                str_outputfolder + "\\mzone" + str(point[1]) + ".txt")
                 arcpy.Delete_management(str_zonesfolder + r"\mzone" + str(point[1]))
 
+    buffer_distance = max(abs(flowdir.raster.meanCellWidth), abs(flowdir.raster.meanCellHeight))
+    create_maxoutput(zones, save_outbci, river_network,
+                     os.path.join(str_zonesfolder, "maxoutput.shp"), buffer_distance)
+
     return
+
+
+def create_maxoutput(zones, outlets, river_network, output, buffer_distance=0):
+    """Create the outlet's border-point Thiessen polygon for each zone, enlarged by buffer_distance."""
+    scratch = arcpy.env.scratchGDB
+    zone_lines = arcpy.CreateUniqueName("zone_lines", scratch)
+    intersections = arcpy.CreateUniqueName("border_intersections", scratch)
+    points = arcpy.CreateUniqueName("border_points", scratch)
+    thiessen = arcpy.CreateUniqueName("border_thiessen", scratch)
+    result = arcpy.CreateUniqueName("maxoutput", scratch)
+    line_layer = "zone_line_" + uuid.uuid4().hex
+    temporary = [line_layer, thiessen, points, intersections, zone_lines, result]
+    spatial_reference = arcpy.Describe(zones).spatialReference
+
+    try:
+        outlet_by_zone = {}
+        with arcpy.da.SearchCursor(outlets, ["zoneid", "SHAPE@"]) as cursor:
+            for zone_id, geometry in cursor:
+                if zone_id in outlet_by_zone:
+                    raise ValueError("Multiple output boundary points for zone {}.".format(zone_id))
+                outlet_by_zone[zone_id] = geometry
+
+        with arcpy.EnvManager(extent=None, outputCoordinateSystem=spatial_reference):
+            arcpy.PolygonToLine_management(zones, zone_lines, "IGNORE_NEIGHBORS")
+            arcpy.MakeFeatureLayer_management(zone_lines, line_layer)
+            arcpy.CreateFeatureclass_management(
+                scratch, os.path.basename(result), "POLYGON",
+                spatial_reference=spatial_reference)
+            arcpy.AddField_management(result, "zoneid", "LONG")
+
+            seen_zones = set()
+            with arcpy.da.SearchCursor(zones, ["OID@", "GRID_CODE", "SHAPE@"]) as zone_cursor:
+                with arcpy.da.InsertCursor(result, ["zoneid", "SHAPE@"]) as result_cursor:
+                    for oid, zone_id, zone_geometry in zone_cursor:
+                        if zone_id in seen_zones:
+                            raise ValueError("Multiple envelope features for zone {}.".format(zone_id))
+                        seen_zones.add(zone_id)
+                        if zone_id not in outlet_by_zone:
+                            raise ValueError("No output boundary point for zone {}.".format(zone_id))
+
+                        where = "{} = {}".format(arcpy.AddFieldDelimiters(zone_lines, "ORIG_FID"), oid)
+                        arcpy.SelectLayerByAttribute_management(line_layer, "NEW_SELECTION", where)
+                        arcpy.analysis.PairwiseIntersect(
+                            [line_layer, river_network], intersections, "ONLY_FID", output_type="POINT")
+                        arcpy.MultipartToSinglepart_management(intersections, points)
+                        arcpy.DeleteIdentical_management(points, ["Shape"])
+                        if int(arcpy.GetCount_management(points)[0]) == 0:
+                            raise ValueError("No river network intersections on the border of zone {}.".format(zone_id))
+
+                        with arcpy.EnvManager(extent=zone_geometry.extent):
+                            arcpy.analysis.CreateThiessenPolygons(points, thiessen)
+
+                        candidates = []
+                        with arcpy.da.SearchCursor(thiessen, ["SHAPE@"]) as polygon_cursor:
+                            for (polygon,) in polygon_cursor:
+                                candidates.append(
+                                    (polygon.distanceTo(outlet_by_zone[zone_id]), polygon))
+                        if not candidates:
+                            raise ValueError("No Thiessen polygon created for zone {}.".format(zone_id))
+                        min_distance = min(distance for distance, _ in candidates)
+                        matches = [polygon for distance, polygon in candidates
+                                   if distance - min_distance <= 1e-9]
+                        if len(matches) != 1:
+                            raise ValueError(
+                                "Expected one Thiessen polygon closest to the output point for zone {}; found {}."
+                                .format(zone_id, len(matches)))
+                        clipped = matches[0].intersect(zone_geometry, 4)
+                        if not clipped or clipped.area == 0:
+                            raise ValueError("Empty output polygon for zone {}.".format(zone_id))
+                        if buffer_distance:
+                            clipped = clipped.buffer(buffer_distance)
+                        result_cursor.insertRow([zone_id, clipped])
+                        arcpy.Delete_management(thiessen)
+                        arcpy.Delete_management(points)
+                        arcpy.Delete_management(intersections)
+
+            if not seen_zones:
+                raise ValueError("No envelope zones were found.")
+            arcpy.CopyFeatures_management(result, output)
+    finally:
+        for dataset in temporary:
+            if arcpy.Exists(dataset):
+                arcpy.Delete_management(dataset)

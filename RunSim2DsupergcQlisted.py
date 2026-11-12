@@ -20,6 +20,13 @@ from RasterIO import *
 class pointflowpath:
    pass
 
+
+def is_outside_polygon(polygon, x, y):
+    # polygon is None when no restriction applies
+    if polygon is None:
+        return False
+    return polygon.disjoint(arcpy.PointGeometry(arcpy.Point(x, y), polygon.spatialReference))
+
 def log_message(filelog, level, message):
     """
     Write formatted log messages with timestamp.
@@ -234,6 +241,12 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
     for point in bcipointcursor:
         listzonesout[point[0]] = point
 
+    # Creating a dictionary of the maximum output polygons by zone (maxoutput.shp, created by the DefBCI tool)
+    dict_maxoutput = {}
+    with arcpy.da.SearchCursor(str_zonefolder + "\\maxoutput.shp", ["zoneid", "SHAPE@"]) as maxoutputcursor:
+        for maxoutputrow in maxoutputcursor:
+            dict_maxoutput[maxoutputrow[0]] = maxoutputrow[1]
+
     # Creating a dictionary of maximum output window size by zone and one of lake id by zone (if any)
     zones = str_zonefolder + "\\envelopezones.shp"
     dict_outputwindow = {}
@@ -308,6 +321,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             if point[1] in lakeid_byzone:
                                 hfix = fieldz_bylakeid[lakeid_byzone[point[1]]][Q_iteration]
                                 lakebci = True
+
                             else:
                                 if not os.path.exists(currentresult):
                                     messages.addErrorMessage("Downsteam boudary condition not found: tile #" + str(point[1]))
@@ -409,6 +423,14 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 except Exception as e:
                                     log_message(filelog, "WARNING", f"Could not extract value from downstream lakes raster for zone {point[1]}: {str(e)}")
 
+                            # Downstream boundary conditions are only added inside the maxoutput polygon of the zone
+                            maxoutput_polygon = None
+                            if not lakebci:
+                                if point[1] not in dict_maxoutput:
+                                    raise Exception("No polygon found in maxoutput.shp for zone " + str(point[1]))
+                                maxoutput_polygon = dict_maxoutput[point[1]]
+                            stopped = False
+
                             # Starting at the outbci point, going in one direction first (either horizontally or vertically)
                             currentcol = ref_raster.XtoCol(newpoint.shape.X)
                             currentrow = ref_raster.YtoRow(newpoint.shape.Y)
@@ -465,6 +487,9 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 distance += distinc
                                 currentrow += rowinc
                                 currentcol += colinc
+                                if is_outside_polygon(maxoutput_polygon, ref_raster.ColtoX(currentcol), ref_raster.RowtoY(currentrow)):
+                                    stopped = True
+                                    break
                                 if newpoint.side == "W" or newpoint.side == "E":
                                     newpoint.lim1 = ref_raster.RowtoY(currentrow)
                                 else:
@@ -503,7 +528,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             currentcol -= colinc
 
                             # If we went out of the raster, we turn and go on on another face of the raster
-                            if distance < distoutput / 2:
+                            if distance < distoutput / 2 and not stopped:
                                 distance -= distinc
                                 if newpoint.side == "W":
                                     colinc = 1
@@ -542,6 +567,8 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                     distance += distinc
                                     currentrow += rowinc
                                     currentcol += colinc
+                                    if is_outside_polygon(maxoutput_polygon, ref_raster.ColtoX(currentcol), ref_raster.RowtoY(currentrow)):
+                                        break
 
                                     if newpoint.side2 == "W" or newpoint.side2 == "E":
                                         newpoint.lim4 = ref_raster.RowtoY(currentrow)
@@ -585,6 +612,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                             newpoint.lim4) + "\tHVAR\thvar" + "\n")
 
                             # Starting again on the other direction from the outbci point
+                            stopped = False
                             colinc = 0
                             rowinc = 0
                             distinc = 0
@@ -606,8 +634,11 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                 distance += distinc
                                 currentrow += rowinc
                                 currentcol += colinc
+                                if is_outside_polygon(maxoutput_polygon, ref_raster.ColtoX(currentcol), ref_raster.RowtoY(currentrow)):
+                                    stopped = True
+                                    break
                                 if newpoint.side == "W" or newpoint.side == "E":
-                                    newpoint.lim2 = ref_raster.RowtoY(currentrow)
+                                    newpoint.lim2 =  ref_raster.RowtoY(currentrow)
                                 else:
                                     newpoint.lim2 = ref_raster.ColtoX(currentcol)
                                 if not lakebci:
@@ -642,7 +673,7 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                             currentcol -= colinc
 
 
-                            if distance < distoutput / 2:
+                            if distance < distoutput / 2 and not stopped:
                                 distance -= distinc
                                 if newpoint.side == "W":
                                     colinc = 1
@@ -679,6 +710,8 @@ def execute_RunSim_prev(str_zonefolder, str_simfolder, str_lisfloodfolder, str_l
                                     distance += distinc
                                     currentrow += rowinc
                                     currentcol += colinc
+                                    if is_outside_polygon(maxoutput_polygon, ref_raster.ColtoX(currentcol), ref_raster.RowtoY(currentrow)):
+                                        break
 
                                     if newpoint.side2 == "W" or newpoint.side2 == "E":
                                         newpoint.lim4 = ref_raster.RowtoY(currentrow)
