@@ -11,6 +11,7 @@ from qgis.core import (
     QgsFeature,
     QgsGeometry,
     QgsPointXY,
+    QgsRectangle,
     QgsWkbTypes,
     QgsVectorFileWriter,
     QgsCoordinateTransformContext,
@@ -29,6 +30,7 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
     ZBED          = "ZBED"
     MANNING       = "MANNING"
     MASK          = "MASK"
+    RIVER_NETWORK = "RIVER_NETWORK"
     OUTPUT_FOLDER = "OUTPUT_FOLDER"
 
     def name(self):
@@ -63,6 +65,11 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             "- DEM: watershed-scale DEM (e.g. lidar10m_avg)\n"
             "- D4 width, D4 bed elevation, floodplain Manning's n, channel mask: (e.g. Lisflood_inputs\\widthD4, bed, n_floodplain, mask)"
             "rasters clipped per zone and converted to ASCII\n"
+            "- River network: line layer (e.g. Geometry.gdb\\routesD8) used to write "
+            "Tiles\\maxoutput.gpkg: per zone, the Thiessen polygon (built from the "
+            "river/zone-border intersections) closest to the outbci point, buffered by "
+            "the flow direction cell size. Run Hydraulic Simulations stops the "
+            "downstream boundary progression outside this polygon\n"
             "- Output folder: destination for .bci and ASCII files (Simulations\\sims)\n\n"
             "The downstream boundary condition (exit window into each tile's .bci "
             "file) is no longer computed here — it's computed at run time by Run "
@@ -76,6 +83,8 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             QgsProcessingParameterFile,
             QgsProcessingParameterNumber,
             QgsProcessingParameterFolderDestination,
+            QgsProcessingParameterVectorLayer,
+            QgsProcessing,
         )
 
         self.addParameter(QgsProcessingParameterRasterLayer(
@@ -108,6 +117,10 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterRasterLayer(
             self.MASK, "Channel mask (mask)",
         ))
+        self.addParameter(QgsProcessingParameterVectorLayer(
+            self.RIVER_NETWORK, "River network (routesD8)",
+            types=[QgsProcessing.TypeVectorLine],
+        ))
         self.addParameter(QgsProcessingParameterFolderDestination(
             self.OUTPUT_FOLDER, r"Output folder for .bci and ASCII files (Simulations\sims)",
         ))
@@ -121,9 +134,12 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
         zbed          = self.parameterAsRasterLayer(parameters, self.ZBED, context)
         manning       = self.parameterAsRasterLayer(parameters, self.MANNING, context)
         mask          = self.parameterAsRasterLayer(parameters, self.MASK, context)
+        river_network = self.parameterAsVectorLayer(parameters, self.RIVER_NETWORK, context)
         percent = self.parameterAsDouble(parameters, self.PERCENT, context)
         output_folder = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
 
+        if river_network is None:
+            raise QgsProcessingException("River network layer is invalid")
         if not all([flowdir, flowacc, dem, width, zbed, manning, mask]):
             raise QgsProcessingException("One or more input rasters are invalid")
         if not zones_folder or not os.path.isdir(zones_folder):
@@ -144,6 +160,7 @@ class HydraulicSimPrep(QgsProcessingAlgorithm):
             output_folder=output_folder,
             crs=flowdir.crs(),
             feedback=feedback,
+            river_network=river_network,
         )
 
         return {self.OUTPUT_FOLDER: output_folder}
@@ -264,6 +281,90 @@ class _Point:
     __slots__ = ("type", "frompointid", "x", "y", "numzone", "flowacc", "side")
 
 
+def compute_maxoutput_polygon(extent, outlet, river_geometries, buffer_distance=0):
+    """Area where the downstream boundary of one zone may progress.
+
+    Points = zone border (extent rectangle) ∩ river network. A Thiessen
+    diagram of those points is built over the zone; the polygon closest to
+    the outlet is kept, clipped to the zone and buffered."""
+    xmin, ymin, xmax, ymax = extent
+    zone_geom = QgsGeometry.fromRect(QgsRectangle(xmin, ymin, xmax, ymax))
+    border = QgsGeometry.fromPolylineXY([
+        QgsPointXY(xmin, ymin), QgsPointXY(xmax, ymin), QgsPointXY(xmax, ymax),
+        QgsPointXY(xmin, ymax), QgsPointXY(xmin, ymin),
+    ])
+
+    points = {}
+    for river in river_geometries:
+        if river is None or river.isEmpty():
+            continue
+        inter = border.intersection(river)
+        if inter.isEmpty():
+            continue
+        for vertex in inter.vertices():
+            points[(round(vertex.x(), 6), round(vertex.y(), 6))] = QgsPointXY(vertex.x(), vertex.y())
+    if not points:
+        raise QgsProcessingException(
+            "No intersection between the river network and the zone border"
+        )
+
+    if len(points) == 1:
+        polygons = [zone_geom]
+    else:
+        sites = QgsGeometry.fromMultiPointXY(list(points.values()))
+        voronoi = sites.voronoiDiagram(zone_geom, 0.0)
+        polygons = []
+        for polygon in voronoi.asGeometryCollection():
+            clipped = polygon.intersection(zone_geom)
+            if not clipped.isEmpty() and clipped.type() == QgsWkbTypes.PolygonGeometry:
+                polygons.append(clipped)
+        if not polygons:
+            raise QgsProcessingException("No Thiessen polygon created for the zone")
+
+    outlet_geom = QgsGeometry.fromPointXY(outlet)
+    distances = [p.distance(outlet_geom) for p in polygons]
+    best = min(distances)
+    closest = [p for p, d in zip(polygons, distances) if d - best <= 1e-9]
+    if len(closest) != 1:
+        raise QgsProcessingException(
+            f"Expected one Thiessen polygon closest to the outlet; found {len(closest)}"
+        )
+    result = closest[0]
+    if buffer_distance:
+        result = result.buffer(buffer_distance, 8)
+    return result
+
+
+def create_maxoutput(zone_extents, outlets, river_geometries, buffer_distance,
+                     output_path, crs):
+    """Writes one polygon per zone (field zoneid) to output_path."""
+    missing = sorted(set(zone_extents) - set(outlets))
+    if missing:
+        raise QgsProcessingException(f"No outbci point for zone(s): {missing}")
+
+    fields = QgsFields()
+    fields.append(QgsField("zoneid", QMetaType.Int))
+    options = QgsVectorFileWriter.SaveVectorOptions()
+    options.driverName = "GPKG"
+    options.fileEncoding = "UTF-8"
+    options.layerName = "maxoutput"
+    writer = QgsVectorFileWriter.create(
+        output_path, fields, QgsWkbTypes.Polygon, crs,
+        QgsCoordinateTransformContext(), options,
+    )
+    if writer is None:
+        raise QgsProcessingException(f"Could not create {output_path}")
+    for zone_id, extent in zone_extents.items():
+        geom = compute_maxoutput_polygon(
+            extent, outlets[zone_id], river_geometries, buffer_distance
+        )
+        f = QgsFeature(fields)
+        f.setGeometry(geom)
+        f.setAttributes([zone_id])
+        writer.addFeature(f)
+    del writer
+
+
 def prepare_hydraulic_sim(
     flowdir_path,
     flowacc_path,
@@ -277,6 +378,7 @@ def prepare_hydraulic_sim(
     output_folder,
     crs,
     feedback=None,
+    river_network=None,
 ):
     """
     Mirrors ArcGIS_dev's execute_DefBCI(): builds per-zone LISFLOOD-FP input
@@ -298,6 +400,8 @@ def prepare_hydraulic_sim(
         output_folder  : str — destination folder for .bci and ASCII files
         crs            : QgsCoordinateReferenceSystem — CRS for inbci/outbci QC layers
         feedback       : QgsProcessingFeedback or None
+        river_network  : QgsVectorLayer (lines) or None — when given,
+                         maxoutput.gpkg is written in zones_folder
     """
 
     def info(msg):
@@ -533,6 +637,21 @@ def prepare_hydraulic_sim(
         writer.addFeature(f)
     del writer
     info(f"  Wrote {inbci_path} and {outbci_path}")
+
+    # ------------------------------------------------------------------
+    # Step 3b: maxoutput.gpkg (zone area allowed for the downstream BC)
+    # ------------------------------------------------------------------
+    if river_network is not None:
+        info("Creating maxoutput.gpkg…")
+        buffer_distance = max(abs(fd_gt[1]), abs(fd_gt[5]))
+        create_maxoutput(
+            zone_extents,
+            {pt.numzone: QgsPointXY(pt.x, pt.y) for pt in output_points},
+            [f.geometry() for f in river_network.getFeatures()],
+            buffer_distance,
+            os.path.join(zones_folder, "maxoutput.gpkg"),
+            crs,
+        )
 
     # ------------------------------------------------------------------
     # Step 4: write .bci files and ASCII rasters

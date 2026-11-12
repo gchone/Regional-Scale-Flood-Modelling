@@ -23,6 +23,8 @@ from qgis.core import (
     QgsProcessingParameterNumber,
     QgsProcessingParameterFileDestination,
     QgsVectorLayer,
+    QgsGeometry,
+    QgsPointXY,
     QgsWkbTypes,
 )
 
@@ -114,7 +116,8 @@ class RunHydraulicSimulations(QgsProcessingAlgorithm):
             "fields parameter - selection order doesn't matter, each is matched to "
             "its discharge by number.\n\n"
             "Inputs:\n"
-            "- Tiles folder: contains envelopezones.gpkg, outbci.gpkg, and "
+            "- Tiles folder: contains envelopezones.gpkg, outbci.gpkg, maxoutput.gpkg "
+            "(limits the downstream boundary progression) and "
             "the per-zone DEM raster, all from Hydraulic simulations preparation "
             "(zoneN.tif only - the w/d/n/m zone rasters HydraulicSimPrep clips are "
             "temporary and converted straight to ASCII in the simulations folder, "
@@ -428,7 +431,7 @@ def _write_hvar(filebci, filebdy, side, lim_a, lim_b, zdep, hfix, sim_time, numh
 
 def _write_downstream_boundary(
     filebci, filebdy, ref_grid, res_grid, lakebci, hfix_lake, side, outpoint_x, outpoint_y,
-    distoutput, zbed_grid, sim_time, numhvar,
+    distoutput, zbed_grid, sim_time, numhvar, max_polygon=None,
 ):
     """
     Writes the downstream boundary condition to the .bci/.bdy files: walks
@@ -475,6 +478,16 @@ def _write_downstream_boundary(
         zdep = min(base_val + 0.3, hfix)
         numhvar = _write_hvar(filebci, filebdy, cur_side, lim_a, lim_b, zdep, hfix, sim_time, numhvar)
 
+    def outside_max_polygon(row, col):
+        """True when the cell centre is outside the zone's maxoutput polygon
+        (never for lake boundaries or when no polygon is given)."""
+        if lakebci or max_polygon is None:
+            return False
+        point = QgsGeometry.fromPointXY(
+            QgsPointXY(ref_grid.col_to_x(col), ref_grid.row_to_y(row))
+        )
+        return max_polygon.disjoint(point)
+
     def walk_primary(sign, write_initial):
         """One pass from the outbci point, in the +1 or -1 direction along
         the zone's own exit side. Returns (lim, turned_side2, lim3, lim4)."""
@@ -498,10 +511,14 @@ def _write_downstream_boundary(
             sample_and_maybe_write(row, col, center - dist_inc / 2.0, center + dist_inc / 2.0, side, use_zbed=True)
 
         distance = 0.0
+        stopped = False
         while ref_grid.in_bounds(row, col) and distance < distoutput / 2.0:
             distance += dist_inc
             row += row_inc
             col += col_inc
+            if outside_max_polygon(row, col):
+                stopped = True
+                break
             lim = ref_grid.row_to_y(row) if primary_axis_row else ref_grid.col_to_x(col)
             sample_and_maybe_write(row, col, lim - dist_inc / 2.0, lim + dist_inc / 2.0, side)
 
@@ -513,7 +530,7 @@ def _write_downstream_boundary(
         lim3 = 0.0
         lim4 = 0.0
 
-        if distance < distoutput / 2.0:
+        if distance < distoutput / 2.0 and not stopped:
             # Ran out of raster before filling the window - turn 90 degrees
             distance -= dist_inc
             if side == "W":
@@ -540,6 +557,8 @@ def _write_downstream_boundary(
                 distance += dist_inc2
                 turn_row += row_inc2
                 turn_col += col_inc2
+                if outside_max_polygon(turn_row, turn_col):
+                    break
                 lim4 = ref_grid.row_to_y(turn_row) if side2 in ("W", "E") else ref_grid.col_to_x(turn_col)
                 sample_and_maybe_write(turn_row, turn_col, lim4 - dist_inc2 / 2.0, lim4 + dist_inc2 / 2.0, side2)
             turn_row -= row_inc2
@@ -982,6 +1001,22 @@ def run_hydraulic_simulations(
         perimeter = 2 * (ext.width() + ext.height())
         dict_outputwindow[zone_id] = min(MAX_DISTOUTPUT, perimeter / 4.0)
 
+    # maxoutput polygon per zone (limits the downstream boundary progression)
+    maxoutput_path = os.path.join(tiles_folder, "maxoutput.gpkg")
+    if not os.path.exists(maxoutput_path):
+        raise QgsProcessingException(
+            f"{maxoutput_path} not found - rerun Hydraulic Simulations preparation "
+            f"with the river network"
+        )
+    dict_maxoutput = {}
+    for feat in _load_layer(maxoutput_path, "maxoutput").getFeatures():
+        dict_maxoutput[int(feat["zoneid"])] = feat.geometry()
+    missing_maxoutput = [z for z in listzonesout if z not in lakeid_byzone and z not in dict_maxoutput]
+    if missing_maxoutput:
+        raise QgsProcessingException(
+            f"No maxoutput polygon for zone(s): {sorted(missing_maxoutput)}"
+        )
+
     # lake feature id (fid) -> feature, for hfix lookups by discharge field name
     lakes_by_id = {feat.id(): feat for feat in lakes.getFeatures()}
 
@@ -1165,6 +1200,7 @@ def run_hydraulic_simulations(
                                 filebci, filebdy, ref_grid, res_grid, lakebci, hfix_lake,
                                 out_side, outpoint.x(), outpoint.y(), distoutput,
                                 zbed_grid_full, sim_time, numhvar=1,
+                                max_polygon=dict_maxoutput.get(zone),
                             )
 
                         if tmp_res_path:
